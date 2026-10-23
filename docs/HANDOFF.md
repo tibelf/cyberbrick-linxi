@@ -16,6 +16,7 @@
 
 ## 下一步（按优先级）
 
+0. **主线已切换到 v3 纯网页版**（见 `docs/技术方案-v3-网页版.md`），按 W0→W5 推进。W0：①接上 Core，查 USB 芯片类型/VID，测试 Android Chrome + web-serial-polyfill 能否进入 raw REPL；②在电脑 Chrome 里做最小页面，验证麦克风 16k PCM → 灵矽 stt
 1. **M0 备份原厂固件 + 读出接线配置**：用 USB 连接**车上的** Core（不是遥控器），执行 `mpremote connect <串口> fs cp -r :/ firmware/backup/`，然后提交。重点看 `rc_config`：它是 CyberBrick App 写入的配置，记录了每个 MOTOR / SERVO 端口接的是什么（哪条履带、炮塔、发射），可以据此确定引脚映射（见「已确认事实」里的端口表）
 2. **按 `rc_config` 修正 `linx-client/linx_client/tank/serial_repl.py` 的 `BOOTSTRAP`**，再用 `tank-test --backend serial` 架空逐项确认履带方向、转向时长、炮塔角度方向和发射（M2）
 3. **M1 收尾**：真实麦克风说话测试，确认外放回声不会触发误识别（必要时戴耳机）
@@ -57,6 +58,8 @@
 - 比赛日期和演示形式
 
 ## 决策记录
+
+- **2026-10-23**：主线改为纯网页版（用户有 Android 手机）。控车有线（WebUSB + raw REPL，车上固件不用改）和无线（Web Bluetooth + BLE 白名单固件）都要做，先做有线。依据：实测平台只认 device-id、OTA 接口允许跨域、下行音频是 PCM
 
 - **2026-10-23**：车型确认为 Mini T。对照官方固件后发现当前代码的左履带映射可疑；决定先在 M0 读出 `rc_config` 确定真实接线，再改 `BOOTSTRAP`，不凭猜测改代码
 - **2026-10-23**：观察到连接建立后平台会主动调用 `self.get_device_status`（两次），属于正常行为
