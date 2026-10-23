@@ -12,7 +12,7 @@
 
 ## 进行中
 
-- **M1 灵矽激活**：已执行 `python -m linx_client activate`，OTA 上报成功并拿到激活码，正在等用户到智控台绑定。虚拟设备 `Device-Id: 9A:BD:6D:4D:8A:A0`，身份文件是 `linx-client/.linx_device.json`（已 gitignore，不要删）。绑定后下一步：智控台设置 Function Call 和提示词，然后执行 `run --backend mock`。
+- **M1 灵矽激活**：已执行 `python -m linx_client activate`，OTA 上报成功，**设备已在智控台绑定（✅ 2026-10-23）**。虚拟设备 `Device-Id: 9A:BD:6D:4D:8A:A0`，身份文件是 `linx-client/.linx_device.json`（已 gitignore，不要删）。下一步：确认智控台已设置 Function Call 和提示词，然后执行 `.venv/bin/python -m linx_client run --backend mock`。
 
 ## 下一步（按优先级）
 
@@ -25,7 +25,7 @@
 | 项 | 状态 |
 |---|---|
 | 单元测试 | ✅ 14 passed（`linx-client/.venv`，Python 3.13） |
-| 灵矽 OTA 上报 | ✅ 真实平台返回激活码 |
+| 灵矽 OTA 上报 + 设备绑定 | ✅ 已绑定 |
 | 灵矽 WebSocket 握手 | ❓ 待绑定后验证 |
 | 服务端下行音频格式（pcm / opus） | ❓ 未知 |
 | `t 文字` 文本调试（`listen.detect`） | ❓ 未知 |
