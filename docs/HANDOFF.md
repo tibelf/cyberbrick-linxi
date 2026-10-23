@@ -36,7 +36,7 @@
 
 - 硬件：CyberBrick 履带小车 + 顶部发射器，主控 ESP32-C3（MicroPython）；有原厂实体遥控器
 - 开发机：macOS；Python 环境用 `linx-client/.venv`（`python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt`）
-- GitHub：`GaIIagherdev/cyberbrick-voice`（私有）
+- GitHub：`tibelf/cyberbrick-linxi`（**公开**仓库，origin）；旧私有仓库 `GaIIagherdev/cyberbrick-voice` 已不再使用
 
 ## 待用户确认
 
