@@ -12,21 +12,21 @@
 
 ## 进行中
 
-无。
+- **M1 灵矽激活**：已执行 `python -m linx_client activate`，OTA 上报成功并拿到激活码，正在等用户到智控台绑定。虚拟设备 `Device-Id: 9A:BD:6D:4D:8A:A0`，身份文件是 `linx-client/.linx_device.json`（已 gitignore，不要删）。绑定后下一步：智控台设置 Function Call 和提示词，然后执行 `run --backend mock`。
 
 ## 下一步（按优先级）
 
-1. **跑单元测试**：`cd linx-client && pip install -r requirements-dev.txt && python -m pytest`。本机 base 环境没装 pytest，所以还没在本机跑过
-2. **M0 备份原厂固件**：用 `mpremote` 连接 Core，把原厂文件备份到 `firmware/backup/` 并提交
-3. **M1 灵矽联调**：智控台配置 Function Call 和提示词，执行 `python -m linx_client activate` 绑定设备，再执行 `run --backend mock` 验证工具调用
-4. **M2 实车校准**：车架空后执行 `tank-test --backend serial`，逐项确认履带方向、转向时长、炮塔角度方向和发射
+1. **M0 备份原厂固件**：用 `mpremote` 连接 Core，把原厂文件备份到 `firmware/backup/` 并提交
+2. **M1 灵矽联调**：智控台绑定设备、配置 Function Call 和提示词，再执行 `run --backend mock` 验证工具调用
+3. **M2 实车校准**：车架空后执行 `tank-test --backend serial`，逐项确认履带方向、转向时长、炮塔角度方向和发射
 
 ## 已验证 / 未验证
 
 | 项 | 状态 |
 |---|---|
-| 单元测试 | ❓ 本机未跑（README 写的是“通过单元测试”，需要复核） |
-| 灵矽 OTA / WebSocket 握手 | ❓ 只有本地假平台测试，未连真实平台 |
+| 单元测试 | ✅ 14 passed（`linx-client/.venv`，Python 3.13） |
+| 灵矽 OTA 上报 | ✅ 真实平台返回激活码 |
+| 灵矽 WebSocket 握手 | ❓ 待绑定后验证 |
 | 服务端下行音频格式（pcm / opus） | ❓ 未知 |
 | `t 文字` 文本调试（`listen.detect`） | ❓ 未知 |
 | 引脚映射（来自 CyberClaw） | ❓ 未在本车验证 |
@@ -34,7 +34,7 @@
 ## 已确认事实
 
 - 硬件：CyberBrick 履带小车 + 顶部发射器，主控 ESP32-C3（MicroPython）；有原厂实体遥控器
-- 开发机：macOS
+- 开发机：macOS；Python 环境用 `linx-client/.venv`（`python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt`）
 - GitHub：`GaIIagherdev/cyberbrick-voice`（私有）
 
 ## 待用户确认
