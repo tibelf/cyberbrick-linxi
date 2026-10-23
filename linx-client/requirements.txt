@@ -1,0 +1,5 @@
+websockets>=13
+sounddevice>=0.4
+pyserial>=3.5
+# 仅当服务端下发 opus 音频时需要（另需系统安装 libopus）：
+# opuslib>=3.0
