@@ -193,7 +193,7 @@ async def _run(args):
         from .camera import PhotoTool, make_camera
 
         photo = PhotoTool(make_camera(args.camera), mcp, ident)
-        register_camera_tools(mcp, photo)
+        register_camera_tools(mcp, photo, view=args.camera_view)
         print(f"📷 摄像头：{args.camera}（需在智控台开启视觉分析）")
     session = LinxSession(
         ident,
@@ -285,6 +285,8 @@ def main():
     p_run.add_argument("--web", action="store_true", help="同时打开网页控制台（对话记录、急停、按住说话、手动控车）")
     p_run.add_argument("--web-port", type=int, default=8080, help="网页控制台端口")
     p_run.add_argument("--camera", help="开启拍照工具：0=电脑摄像头序号，http://…=JPEG 快照地址，其他=图片文件")
+    p_run.add_argument("--camera-view", choices=["overhead", "front"], default="overhead",
+                       help="overhead=场地正上方俯拍（车顶贴指向车头的箭头），front=摄像头装在车上朝前")
 
     p_cam = sub.add_parser("camera-test", help="拍一张照片存成文件，检查摄像头（不连平台）")
     p_cam.add_argument("--camera", default="0", help="同 run --camera")

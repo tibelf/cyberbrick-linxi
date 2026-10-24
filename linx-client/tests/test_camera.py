@@ -116,3 +116,13 @@ def test_on_photo_callback(vision_server, tmp_path):
     _call(mcp, "initialize", {"capabilities": {"vision": {"url": url + "/explain2"}}})
     _call(mcp, "tools/call", {"name": "self.camera.take_photo", "arguments": {"question": "杯子在哪？"}}, id=2)
     assert got == [(JPEG, "杯子在哪？", "红色杯子在画面左边，偏 20 度")]
+
+
+def test_camera_view_changes_tool_description():
+    from linx_client.tools import CAMERA_HOWTO
+
+    for view, key in (("overhead", "12 点钟"), ("front", "偏离中心")):
+        mcp = McpServer()
+        register_camera_tools(mcp, lambda question: "", view=view)
+        desc = mcp.tools["self.camera.take_photo"].description
+        assert CAMERA_HOWTO[view] in desc and key in desc and "开火" in desc

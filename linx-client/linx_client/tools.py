@@ -72,14 +72,27 @@ def register_tank_tools(mcp: McpServer, tank: TankExecutor) -> None:
     )
 
 
-def register_camera_tools(mcp: McpServer, photo) -> None:
-    """photo 是 camera.PhotoTool；只有启动时指定了 --camera 才注册。"""
+CAMERA_HOWTO = {
+    # 俯视：摄像头在场地正上方往下拍，画面里同时有车和目标
+    "overhead": "摄像头在场地正上方往下拍，画面里能同时看到小车和周围的东西；小车车顶贴着一个指向车头的箭头。"
+    "question 要让视觉模型以小车为参照来回答，例如“以小车车头箭头方向为 12 点钟，红色杯子在几点钟方向？"
+    "离小车大约几个车身长？中间有没有挡路的东西？”。"
+    "拿到结果后换算成动作：每差 1 个钟点转 30 度（1-5 点钟右转，7-11 点钟左转，6 点钟掉头 180 度），"
+    "转完再前进；距离没把握时先走 1 秒，再拍一次确认，边看边走，直到目标在 12 点钟方向、离车很近。",
+    # 前视：摄像头装在车上朝前，画面就是车看到的
+    "front": "摄像头装在小车上朝前拍，画面就是小车看到的。"
+    "question 写清楚要从画面里得到什么，例如“画面里有没有红色杯子？在左边、中间还是右边？大约偏离中心多少度？”。"
+    "要对准目标时：先拍照问目标偏左还是偏右、偏多少度，再用 self.tank.turn 转过去，然后再拍一次确认目标在中间。",
+}
+
+
+def register_camera_tools(mcp: McpServer, photo, view: str = "overhead") -> None:
+    """photo 是 camera.PhotoTool；只有启动时指定了 --camera 才注册。view 决定怎么教大模型看图。"""
     mcp.add_tool(
         "self.camera.take_photo",
-        "用摄像头拍一张照片并分析画面。用户让你“看看/前面有什么/找一找某个东西/瞄准某个东西”时调用。"
-        "question 写清楚要从画面里得到什么，例如“画面里有没有红色杯子？在左边、中间还是右边？大约偏离中心多少度？”。"
-        "要对准目标时：先拍照问目标偏左还是偏右、偏多少度，再用 self.tank.turn 转过去，然后再拍一次确认目标在中间。"
-        "拍照不代表可以开火，只有用户明确说“开火/发射/打”时才调用 self.tank.fire。",
+        "拍一张照片并让视觉模型回答 question。用户让你“看看/找一找某个东西/瞄准某个东西/去某个地方”时先调用它，不要瞎猜。"
+        + CAMERA_HOWTO[view]
+        + "拍照和瞄准都不代表可以开火，只有用户明确说“开火/发射/打”时才调用 self.tank.fire。",
         [Prop("question", "string", "要从照片里回答的问题")],
         photo,
     )
