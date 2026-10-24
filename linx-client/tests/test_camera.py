@@ -1,0 +1,95 @@
+"""拍照工具：本地假视觉接口校验请求格式（按 2026-10-25 实测的平台格式），再走一遍 MCP 调用。"""
+
+import asyncio
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+import pytest
+
+from linx_client.camera import FileCamera, HttpSnapshotCamera, OpenCVCamera, PhotoTool, explain, make_camera
+from linx_client.identity import Identity
+from linx_client.mcp import McpServer
+from linx_client.tools import register_camera_tools
+
+JPEG = b"\xff\xd8\xff\xe0fake-jpeg\xff\xd9"
+IDENT = Identity(mac="02:00:00:00:00:01", client_id="cid")
+
+
+@pytest.fixture
+def vision_server():
+    seen = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers["Content-Length"]))
+            seen.update(headers=dict(self.headers), body=body)
+            out = json.dumps({"action": "RESPONSE", "response": "红色杯子在画面左边，偏 20 度", "success": True})
+            self._reply("application/json", out.encode())
+
+        def do_GET(self):  # 模拟车载摄像头的快照地址
+            self._reply("image/jpeg", JPEG)
+
+        def _reply(self, ctype, data):
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_port}", seen
+    srv.shutdown()
+
+
+def test_make_camera():
+    assert isinstance(make_camera("0"), OpenCVCamera)
+    assert isinstance(make_camera("http://192.168.1.9/capture"), HttpSnapshotCamera)
+    assert isinstance(make_camera("photo.jpg"), FileCamera)
+    assert make_camera(None) is None
+
+
+def test_explain_request_format(vision_server):
+    url, seen = vision_server
+    answer = explain({"url": url + "/mcp/vision/explain2", "token": "vt"}, IDENT, JPEG, "杯子在哪？")
+    assert answer == "红色杯子在画面左边，偏 20 度"
+    h = seen["headers"]
+    assert h["Authorization"] == "Bearer vt" and h["Device-Id"] == IDENT.mac and h["Client-Id"] == "cid"
+    body = seen["body"]
+    assert 'name="question"'.encode() in body and "杯子在哪？".encode() in body
+    assert b'name="file"; filename="camera.jpg"' in body and b"Content-Type: image/jpeg" in body
+    assert JPEG in body
+
+
+def test_http_snapshot_camera(vision_server):
+    url, _ = vision_server
+    assert HttpSnapshotCamera(url + "/capture").snapshot() == JPEG
+
+
+def _call(mcp, method, params=None, id=1):
+    return asyncio.run(mcp.handle({"jsonrpc": "2.0", "method": method, "params": params or {}, "id": id}))
+
+
+def test_take_photo_via_mcp(vision_server, tmp_path):
+    url, _ = vision_server
+    img = tmp_path / "p.jpg"
+    img.write_bytes(JPEG)
+    mcp = McpServer()
+    photo = PhotoTool(FileCamera(str(img)), mcp, IDENT)
+    register_camera_tools(mcp, photo)
+
+    # 平台没下发视觉接口：工具报错但连接不断
+    r = _call(mcp, "tools/call", {"name": "self.camera.take_photo", "arguments": {"question": "看看"}})
+    assert r["result"]["isError"] is True and "视觉" in r["result"]["content"][0]["text"]
+
+    _call(mcp, "initialize", {"capabilities": {"vision": {"url": url + "/explain2", "token": "vt"}}})
+    assert mcp.vision["token"] == "vt"
+    r = _call(mcp, "tools/call", {"name": "self.camera.take_photo", "arguments": {"question": "杯子在哪？"}}, id=2)
+    assert r["result"]["isError"] is False
+    out = json.loads(r["result"]["content"][0]["text"])
+    assert out["success"] is True and "左边" in out["response"]
+    assert photo.last_jpeg == JPEG

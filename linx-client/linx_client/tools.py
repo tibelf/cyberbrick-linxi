@@ -70,3 +70,16 @@ def register_tank_tools(mcp: McpServer, tank: TankExecutor) -> None:
         [],
         lambda: json.dumps(tank.status(), ensure_ascii=False),
     )
+
+
+def register_camera_tools(mcp: McpServer, photo) -> None:
+    """photo 是 camera.PhotoTool；只有启动时指定了 --camera 才注册。"""
+    mcp.add_tool(
+        "self.camera.take_photo",
+        "用摄像头拍一张照片并分析画面。用户让你“看看/前面有什么/找一找某个东西/瞄准某个东西”时调用。"
+        "question 写清楚要从画面里得到什么，例如“画面里有没有红色杯子？在左边、中间还是右边？大约偏离中心多少度？”。"
+        "要对准目标时：先拍照问目标偏左还是偏右、偏多少度，再用 self.tank.turn 转过去，然后再拍一次确认目标在中间。"
+        "拍照不代表可以开火，只有用户明确说“开火/发射/打”时才调用 self.tank.fire。",
+        [Prop("question", "string", "要从照片里回答的问题")],
+        photo,
+    )
