@@ -47,6 +47,8 @@
 
 ## 已确认事实
 
+- **灵矽支持视觉（2026-10-25 实测）**：智控台「对话与视觉 → 视觉分析」开启并选好视觉模型后，平台在 MCP `initialize` 的 `params.capabilities.vision` 里下发 `{url, token}`（url = `http://xrobo-io.qiniuapi.com/mcp/vision/explain2`；平台自称 `XiaozhiClient`，协议同小智）。**OTA 响应里没有视觉字段**，之前据此认为不支持，判断错了。调用方式同小智 `Esp32Camera::Explain`：POST multipart，字段 `question` + `file`（`camera.jpg`，image/jpeg），请求头 `Authorization: Bearer <token>`、`Device-Id`、`Client-Id`。返回 `{"action":"RESPONSE","response":"<分析文字>","success":true}`，实测 0.8s。我们的 `mcp.py` 目前会忽略 initialize 的参数，需要改为保存下来
+
 - **遥控器 USB 探测（2026-10-24 实测，遥控器接 Mac）**：
   - USB 为 ESP32-C3 原生 `USB JTAG_serial debug unit`，VID `0x303A` / PID `0x1001`，没有 CH340/CP210x（回答了 v3 W0 的芯片疑问；Core 都是同款板，车上的大概率也一样）
   - 启动日志：`Firmware ver: 01.01.04.13`、`Loader ver: 99.00.02.51`，随后 `[MAIN]MASTER_INIT.` → `PARSE_UPDATE`（遥控器上存在 `rc_config`）→ `AUTO_SLEEP_EN.`
