@@ -38,6 +38,9 @@
 ## 已确认事实
 
 - 车（2026-10-24 照片）：Mini T 类履带车 + 顶部发射器；**没有外露 USB 口**；有实体遥控器；官方 CyberBrick App 能通过蓝牙连接
+- 充电（用户 2026-10-24 确认）：车能充电，但车上的充电口**不是 USB**；**遥控器带 USB 口**（可以用 USB 充电，能否传数据待测）
+- 官方文档 `docs/cyberbrick_core/quickref.rst`：每块 Core 都**自带 USB-C 口**，MicroPython REPL 就在这个口上（USB-Serial/JTAG，GPIO18/19，115200）。所以车上的 Core 应该也有 USB-C，只是被车壳挡住了，拆开才能接
+- 官方 `rc_module` 文档（`docs/cyberbrick_core/lib/rc_module.rst`）：`rc_simulation()` 的指令"通常来自 PC 或 App"，`file_transfer()` 也支持"CyberBrick App 或 PC 客户端"同步 `rc_config`。也就是说官方另有一条 PC 通道，具体走哪条链路待查
 - 硬件：**CyberBrick Mini T 坦克**（用户 2026-10-23 确认），主控 ESP32-C3（MicroPython），顶部有发射器；有原厂实体遥控器
 - 官方固件 [CyberBrick_Controller_Core](https://github.com/CyberBrick-Official/CyberBrick_Controller_Core) `src/app_rc/bbl/` 定义的接收板端口：
 
