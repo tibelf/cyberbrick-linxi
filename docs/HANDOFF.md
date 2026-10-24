@@ -16,6 +16,7 @@
 
 ## 下一步（按优先级）
 
+-1. **（2026-10-24 最新）车没有外露 USB 口，改为逆向原厂蓝牙 simulation 协议**，见 v3 文档 §3.0。当前任务：让用户在 Android 上开启 HCI snoop 日志，用官方 App 的测试功能操作各执行器，再用 `adb bugreport` 导出日志分析 GATT 和 JSON 格式。官方源码可以 clone `CyberBrick-Official/CyberBrick_Controller_Core` 查看
 0. **主线已切换到 v3 纯网页版**（见 `docs/技术方案-v3-网页版.md`），按 W0→W5 推进。W0：①接上 Core，查 USB 芯片类型/VID，测试 Android Chrome + web-serial-polyfill 能否进入 raw REPL；②在电脑 Chrome 里做最小页面，验证麦克风 16k PCM → 灵矽 stt
 1. **M0 备份原厂固件 + 读出接线配置**：用 USB 连接**车上的** Core（不是遥控器），执行 `mpremote connect <串口> fs cp -r :/ firmware/backup/`，然后提交。重点看 `rc_config`：它是 CyberBrick App 写入的配置，记录了每个 MOTOR / SERVO 端口接的是什么（哪条履带、炮塔、发射），可以据此确定引脚映射（见「已确认事实」里的端口表）
 2. **按 `rc_config` 修正 `linx-client/linx_client/tank/serial_repl.py` 的 `BOOTSTRAP`**，再用 `tank-test --backend serial` 架空逐项确认履带方向、转向时长、炮塔角度方向和发射（M2）
@@ -36,6 +37,7 @@
 
 ## 已确认事实
 
+- 车（2026-10-24 照片）：Mini T 类履带车 + 顶部发射器；**没有外露 USB 口**；有实体遥控器；官方 CyberBrick App 能通过蓝牙连接
 - 硬件：**CyberBrick Mini T 坦克**（用户 2026-10-23 确认），主控 ESP32-C3（MicroPython），顶部有发射器；有原厂实体遥控器
 - 官方固件 [CyberBrick_Controller_Core](https://github.com/CyberBrick-Official/CyberBrick_Controller_Core) `src/app_rc/bbl/` 定义的接收板端口：
 
