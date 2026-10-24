@@ -220,8 +220,8 @@ async def _tank_test(args):
     steps = [
         ("前进 1 秒", lambda: tank.move("forward", 1000, args.max_speed)),
         ("后退 1 秒", lambda: tank.move("backward", 1000, args.max_speed)),
-        ("左转 0.6 秒", lambda: tank.turn("left", 600, args.max_speed)),
-        ("右转 0.6 秒", lambda: tank.turn("right", 600, args.max_speed)),
+        ("左转 90°", lambda: tank.turn("left", 90, args.max_speed)),
+        ("右转 90°", lambda: tank.turn("right", 90, args.max_speed)),
         ("炮塔左转 500ms", lambda: tank.turret("left", 500)),
         ("炮塔右转 500ms", lambda: tank.turret("right", 500)),
     ]

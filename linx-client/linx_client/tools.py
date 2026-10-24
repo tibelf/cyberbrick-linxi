@@ -26,10 +26,10 @@ def register_tank_tools(mcp: McpServer, tank: TankExecutor) -> None:
     )
     mcp.add_tool(
         "self.tank.turn",
-        "让小车原地左转或右转。转 90 度大约 800 毫秒（需实测校准），没说时长默认 600 毫秒。",
+        "让小车原地左转或右转（两条履带反向）。没说角度默认 90 度；“掉头”180 度，“转一圈”360 度，“稍微转一点”30 度。",
         [
             Prop("direction", "string", "left=左转，right=右转", enum=["left", "right"]),
-            Prop("duration_ms", "integer", "持续毫秒数", minimum=100, maximum=3000, default=600),
+            Prop("angle", "integer", "转动角度", minimum=10, maximum=360, default=90),
             Prop("speed", "integer", "速度百分比", minimum=10, maximum=100, default=80),
         ],
         tank.turn,

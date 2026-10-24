@@ -11,6 +11,7 @@ MAX_ACTION_MS = 5000
 MAX_QUEUE_MS = 15000
 FAILSAFE_SLACK_MS = 300
 MAX_TURRET_MS = 3000
+MS_PER_90_AT_FULL = 400  # 满速原地转 90° 需要的毫秒数（估计值，待实车校准）
 TURRET_SPEED = 45  # 与原厂遥控（右肩摇杆 ±45）一致
 
 
@@ -102,13 +103,14 @@ class TankExecutor:
         name = "前进" if sign > 0 else "后退"
         return self._enqueue(Action(f"{name} {ms}ms 速度{abs(s)}", ms, lambda: self._drive_for(s, s, ms)))
 
-    def turn(self, direction: str, duration_ms: int, speed: int) -> str:
+    def turn(self, direction: str, angle: int, speed: int) -> str:
         s = self._speed(speed)
-        ms = min(int(duration_ms), MAX_ACTION_MS)
-        # 单侧履带转向
-        left, right = (0, s) if direction == "left" else (s, 0)
+        # 原地转向的角速度近似与速度成正比；MS_PER_90_AT_FULL 需实车校准
+        ms = min(int(int(angle) / 90 * MS_PER_90_AT_FULL * 100 / max(s, 1)), MAX_ACTION_MS)
+        # 原地转向：两条履带反向，比单侧履带转快一倍、几乎不画弧
+        left, right = (-s, s) if direction == "left" else (s, -s)
         name = "左转" if direction == "left" else "右转"
-        return self._enqueue(Action(f"{name} {ms}ms", ms, lambda: self._drive_for(left, right, ms)))
+        return self._enqueue(Action(f"{name} {int(angle)}° {ms}ms", ms, lambda: self._drive_for(left, right, ms)))
 
     def turret(self, direction: str, duration_ms: int) -> str:
         sp = TURRET_SPEED if direction == "left" else -TURRET_SPEED
@@ -125,13 +127,14 @@ class TankExecutor:
 
     def dance(self) -> str:
         async def run():
+            s = self._speed(80)
             for _ in range(2):
-                await self._drive_for(0, self._speed(80), 500)
-                await self._drive_for(self._speed(80), 0, 500)
+                await self._drive_for(-s, s, 400)
+                await self._drive_for(s, -s, 400)
             await self._turret_for(TURRET_SPEED, 400)
             await self._turret_for(-TURRET_SPEED, 400)
 
-        return self._enqueue(Action("跳舞", 3200, run))
+        return self._enqueue(Action("跳舞", 2400, run))
 
     def status(self) -> dict:
         return {
