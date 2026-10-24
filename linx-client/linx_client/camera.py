@@ -135,6 +135,12 @@ class PhotoTool:
         self.on_photo = None  # 网页控制台订阅：(jpeg, question, answer)
 
     async def __call__(self, question: str) -> str:
+        answer = await self.ask(question)
+        # 与小智设备一致：把视觉接口的结果原样交给平台
+        return json.dumps({"success": True, "action": "RESPONSE", "response": answer}, ensure_ascii=False)
+
+    async def ask(self, question: str) -> str:
+        """拍一张并返回视觉模型的回答（闭环寻的也用它）。"""
         vision = self.mcp.vision
         if vision is None:
             raise RuntimeError("平台没有下发视觉接口：请在智控台「对话与视觉 → 视觉分析」开启视觉模型，保存后重连")
@@ -145,5 +151,4 @@ class PhotoTool:
         print(f"📷 {question} → {answer}（{time.monotonic() - t0:.1f}s）")
         if self.on_photo:
             self.on_photo(jpeg, question, answer)
-        # 与小智设备一致：把视觉接口的结果原样交给平台
-        return json.dumps({"success": True, "action": "RESPONSE", "response": answer}, ensure_ascii=False)
+        return answer

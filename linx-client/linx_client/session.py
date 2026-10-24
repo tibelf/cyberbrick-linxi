@@ -82,6 +82,11 @@ class LinxSession:
         """调试用：不说话直接发文本（借用 listen.detect 消息，服务端会把它当作用户输入的唤醒/问题）。"""
         await self._send_json({"session_id": self.session_id, "type": "listen", "state": "detect", "text": text})
 
+    async def say(self, text: str):
+        """让小车主动播报一句话（listen.detect 的 text_response，见 websocket 协议文档；平台效果待实测）。"""
+        await self._send_json({"session_id": self.session_id, "type": "listen", "state": "detect",
+                               "text": "任务完成", "text_response": text})
+
     async def abort(self) -> bool:
         """打断小车说话：通知平台中止本轮回复，本地立即静音。小车没在说话时什么也不做。"""
         if not self.speaking and not (self._speaker and self._speaker.busy()):

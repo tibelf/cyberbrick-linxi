@@ -88,8 +88,26 @@ CAMERA_HOWTO = {
 }
 
 
-def register_camera_tools(mcp: McpServer, photo, view: str = "overhead") -> None:
-    """photo 是 camera.PhotoTool；只有启动时指定了 --camera 才注册。view 决定怎么教大模型看图。"""
+def register_camera_tools(mcp: McpServer, photo, view: str = "overhead", seeker=None) -> None:
+    """photo 是 camera.PhotoTool；只有启动时指定了 --camera 才注册。view 决定怎么教大模型看图。
+    seeker 是 seek.Seeker：本地闭环寻的，大模型调用一次，小车自己边看边调。"""
+    if seeker is not None:
+        mcp.add_tool(
+            "self.tank.seek",
+            "让小车自己看着摄像头去找某个目标：找到后转向对准，goal=approach 时还会走到它跟前。"
+            "小车会自己反复拍照、微调，直到对准或走到，完成后自己播报结果，你只需要调用一次，"
+            "然后告诉用户“收到，我边看边找”，不要再连续调用 take_photo、turn、move。"
+            "用户说“去红色杯子那里/找到那个盒子/对准杯子”时用它。"
+            "fire 只有在用户这句话里明确说了“开火/发射/打它”时才设为 true，对准后会打一发；否则必须是 false。"
+            "绝不对准人或动物。",
+            [
+                Prop("target", "string", "要找的目标，越具体越好，例如“红色杯子”"),
+                Prop("goal", "string", "approach=走到目标跟前，aim=原地转向对准", enum=["approach", "aim"],
+                     default="approach"),
+                Prop("fire", "boolean", "对准后是否开火（用户明确要求才为 true）", default=False),
+            ],
+            seeker,
+        )
     mcp.add_tool(
         "self.camera.take_photo",
         "拍一张照片并让视觉模型回答 question。用户让你“看看/找一找某个东西/瞄准某个东西/去某个地方”时先调用它，不要瞎猜。"
