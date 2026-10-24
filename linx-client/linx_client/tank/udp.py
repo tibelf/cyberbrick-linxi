@@ -12,13 +12,30 @@ import threading
 PORT = 4210
 
 
+def _lan_ip() -> str:
+    """默认路由所在网卡的 IP（UDP connect 不发包）。"""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("192.0.2.1", 9))
+        return probe.getsockname()[0]
+    finally:
+        probe.close()
+
+
 def discover(port: int = PORT, timeout: float = 1.5) -> str | None:
-    """广播 ping，返回第一台应答的车的 IP。"""
+    """广播 ping，返回第一台应答的车的 IP。
+
+    电脑上有虚拟网卡（Docker/虚拟机的 bridge）时，255.255.255.255 可能从别的网卡发出去，
+    所以绑定到默认网卡，并额外发一次该网段的广播（按 /24 估算，家用路由器基本都是）。
+    """
+    ip = _lan_ip()
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     s.settimeout(timeout)
     try:
-        s.sendto(b"ping", ("255.255.255.255", port))
+        s.bind((ip, 0))
+        for dst in (ip.rsplit(".", 1)[0] + ".255", "255.255.255.255"):
+            s.sendto(b"ping", (dst, port))
         while True:
             data, addr = s.recvfrom(64)
             if data == b"pong":

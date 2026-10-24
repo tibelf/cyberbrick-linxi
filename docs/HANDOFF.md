@@ -16,7 +16,8 @@
 
 ## 下一步（按优先级）
 
--4. **（2026-10-24 最新）实车架空测试通过**（见「已验证」表）。下一步：装回炮塔和发射器，确认 `turret left` 的方向，再执行 `env -u https_proxy -u http_proxy -u all_proxy .venv/bin/python -m linx_client run --backend serial --max-speed 40` 做语音控车；落地后校准 turn 的时长（转 90° 要多少毫秒）
+-5. **（2026-10-24 最新）Wi-Fi 无线控车已装到车上**：用户运行了 `wifi-setup`，车连上 2.4G 网络 `CMCC-7GE2`，局域网内 UDP `ping` 能收到 `pong`（车的 IP 当时是 192.168.1.8，DHCP 分配，可能会变）。主机端 `--backend udp` 会自动发现。**下一步**：拔掉 USB 跑 `tank-test --backend udp`，再跑 `run --backend udp` 语音控车。开机按住板载按键 = 原厂遥控；`wifi-setup --uninstall` = 恢复原厂 boot.py
+-4. **（2026-10-24）实车架空测试通过**（见「已验证」表）。下一步：装回炮塔和发射器，确认 `turret left` 的方向，再执行 `env -u https_proxy -u http_proxy -u all_proxy .venv/bin/python -m linx_client run --backend serial --max-speed 40` 做语音控车；落地后校准 turn 的时长（转 90° 要多少毫秒）
 -3. **（2026-10-24）车有 USB，已接通**。`BOOTSTRAP` 已改为调用车上原厂驱动 `/bbl/motors.py`、`/bbl/servos.py`，并在实车上注入成功（未发运动指令）。**下一步**：把车架空，执行 `cd linx-client && .venv/bin/python -m linx_client tank-test --backend serial --max-speed 40`，逐项确认：①前进时两条履带是否都向前（不对就调整 `drive` 里 MOTOR1/2 的正负号或左右对调）；②turn left 是否真的左转；③炮塔 left 是否向左转（不对就把 executor 的 `TURRET_SPEED` 取反）；④发射时扳机 150° 能否打出、能否回到 86°。之后再跑 `run --backend serial` 做语音控车。**2026-10-24 首次 tank-test 时电机不动**：已确认软件正常（实车上 `_m.set_speed(1, 820)` 后 Pin4 占空比 40%，没有报错），原因是**车的电池没电**（开电源后主控板灯不亮）。USB 只能给主控板供电，带不动电机，充好电后再测
 -2. **（2026-10-24）Mini T 的 simulation JSON 对照表已写好**（v3 文档 §3.0「Mini T 动作 → simulation JSON 对照」）。抓到蓝牙日志后，逐条核对 JSON 格式和 GATT 写入内容；MOTOR2 前进是否要发负值、发射后扳机能否自动回位，都要实测
 -1. **（2026-10-24 最新）车没有外露 USB 口，改为逆向原厂蓝牙 simulation 协议**，见 v3 文档 §3.0。当前任务：让用户在 Android 上开启 HCI snoop 日志，用官方 App 的测试功能操作各执行器，再用 `adb bugreport` 导出日志分析 GATT 和 JSON 格式。官方源码可以 clone `CyberBrick-Official/CyberBrick_Controller_Core` 查看
@@ -84,6 +85,8 @@
 - 比赛日期和演示形式
 
 ## 决策记录
+
+- **2026-10-24**：无线控车选 Wi-Fi UDP（车上 `firmware/car/wifi_main.py` + 改过的 `boot.py`），没选逆向原厂蓝牙。原因：工作量小、延迟低、确定性高。车只接受白名单指令（drive/turret/fire/halt/ping），不执行任意代码；Wi-Fi 密码只写到车上的 `/wifi.json`，不进仓库。已在实车验证 `Timer` 回调在 `recvfrom` 阻塞期间能正常触发，断网后看门狗照样停车。注意：ESP32-C3 只支持 2.4G；Mac 上有虚拟网卡时，发 `255.255.255.255` 广播会走错网卡，所以自动发现要绑定默认网卡并发子网广播
 
 - **2026-10-24**：车有 USB，控车回到「USB raw REPL」主线。`BOOTSTRAP` 不再自己拼 PWM，而是调用车上的原厂驱动（H 桥刹车、舵机占空比都由官方实现）。炮塔是连续旋转舵机，所以工具 `self.tank.aim(angle)` 改为 `self.tank.turret(direction, duration_ms)`，速度固定为 45，与原厂遥控一致；后端接口相应从 `aim(angle)` 改为 `turret(speed, failsafe_ms)`，保留 failsafe 语义。`halt()` 会刹停两条履带、停炮塔，并让扳机回到 86°
 
