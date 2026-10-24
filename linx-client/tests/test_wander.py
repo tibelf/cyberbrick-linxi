@@ -36,7 +36,7 @@ def _drives(be):
     return [c for c in be.calls if c[0] == "drive"]
 
 
-async def _start(answers, view="overhead", paused=None, fire_enabled=True):
+async def _start(answers, view="overhead", paused=None, fire_enabled=True, **kw):
     be = MockBackend(verbose=False)
     tank = TankExecutor(be, fire_enabled=fire_enabled)
     await tank.start()
@@ -48,7 +48,9 @@ async def _start(answers, view="overhead", paused=None, fire_enabled=True):
     async def ask(q):
         return answers(q) if callable(answers) else (answers.pop(0) if answers else "看不清")
 
-    w = Wanderer(tank, ask, say=say, view=view, paused=paused, rng=random.Random(1), seg_ms=(50, 60))
+    opts = dict(seg_ms=(300, 400), probe_ms=300, look_gap_s=0.1)
+    opts.update(kw)
+    w = Wanderer(tank, ask, say=say, view=view, paused=paused, rng=random.Random(1), **opts)
     w()
     return be, tank, said
 
@@ -78,9 +80,9 @@ def test_keeps_going_until_stop_and_never_fires():
 
 def test_backs_off_when_stuck():
     async def main():
-        # 第一次看到后试探前进，第二次位置没变 → 撞到了：应该后退（两条履带都为负）
-        be, tank, _ = await _start(["坦克=50,50；空地=上,右", "坦克=50,50；空地=上,右"])
-        await asyncio.sleep(1.0)
+        # 第一次看到后试探前进；走了 0.5s 再看位置没变 → 撞到了：应该后退（两条履带都为负）
+        be, tank, _ = await _start(["坦克=50,50；空地=上,右", "坦克=50,50；空地=上,右"], probe_ms=2000, look_gap_s=0.5)
+        await asyncio.sleep(1.5)
         await tank.stop()
         await tank.close()
         drives = _drives(be)
@@ -97,7 +99,8 @@ def test_does_not_drive_off_screen_edge():
         await asyncio.sleep(0.8)
         await tank.stop()
         await tank.close()
-        assert _drives(be)[0][1] == _drives(be)[0][2] < 0
+        assert any(d[1] == d[2] < 0 for d in _drives(be))  # 后退，而不是往画面外开
+        assert not any(d[1] == d[2] > 0 for d in _drives(be))
 
     asyncio.run(main())
 
@@ -108,8 +111,8 @@ def test_front_view_turns_to_open_side():
         await asyncio.sleep(0.5)
         await tank.stop()
         await tank.close()
-        d = _drives(be)[0]
-        assert d[1] < 0 < d[2]  # 左转
+        assert any(d[1] < 0 < d[2] for d in _drives(be))  # 左转
+        assert not any(d[1] == d[2] > 0 for d in _drives(be)[:1])  # 前方堵着时第一下不是往前冲
 
     asyncio.run(main())
 
@@ -173,5 +176,41 @@ def test_unexpected_error_does_not_end_wander():
         assert tank.status()["mission"] == "自由闲逛" and _drives(be) and not said
         await tank.stop()
         await tank.close()
+
+    asyncio.run(main())
+
+
+def test_pipelined_no_pause_between_segments():
+    """边走边看：下一段在当前这段走完前就排好了，所以中间不会停下来。"""
+    async def main():
+        x = [10.0]
+
+        def moving(q):
+            x[0] += 3
+            return f"坦克={x[0]:.0f},50；空地=右,右上,右下"
+
+        be, tank, _ = await _start(moving, seg_ms=(400, 500), probe_ms=400, look_gap_s=0.15)
+        await asyncio.sleep(2.2)
+        forwards = [d for d in _drives(be) if d[1] == d[2] > 0]
+        idle = tank.idle_epoch
+        await tank.stop()
+        await tank.close()
+        assert len(forwards) >= 4
+        assert idle <= 1  # 队列一次都没空过（开头那次除外）
+
+    asyncio.run(main())
+
+
+def test_brakes_immediately_when_path_ahead_blocked():
+    async def main():
+        answers = ["坦克=20,50；空地=右,上", "坦克=25,50；空地=右,上", "坦克=30,50；空地=上"]
+        be, tank, _ = await _start(answers, seg_ms=(3000, 3000), probe_ms=3000, look_gap_s=0.3)
+        await asyncio.sleep(1.2)
+        await tank.stop()
+        await tank.close()
+        # 车头朝右在走，第三张看到右边堵了 → 不等这段走完，直接转向（左转去“上”）
+        assert any(d[1] < 0 < d[2] for d in _drives(be))
+        halts = [i for i, c in enumerate(be.calls) if c[0] == "halt"]
+        assert halts
 
     asyncio.run(main())
