@@ -197,7 +197,12 @@ async def _run(args):
         photo = PhotoTool(make_camera(args.camera), mcp, ident)
         # say 要用到后面才创建的 session，所以包一层，调用时再取
         seeker = Seeker(tank, photo.ask, say=lambda text: session.say(text), view=args.camera_view)
-        register_camera_tools(mcp, photo, view=args.camera_view, seeker=seeker)
+        from .wander import Wanderer
+
+        # 和平台断开时听不到“停”，闲逛先暂停；重连后自动继续
+        wanderer = Wanderer(tank, photo.ask, say=lambda text: session.say(text), view=args.camera_view,
+                            paused=lambda: session.ws is None)
+        register_camera_tools(mcp, photo, view=args.camera_view, seeker=seeker, wanderer=wanderer)
         print(f"📷 摄像头：{args.camera}（需在智控台开启视觉分析）")
     session = LinxSession(
         ident,
