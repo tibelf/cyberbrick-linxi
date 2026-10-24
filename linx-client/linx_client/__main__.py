@@ -188,10 +188,12 @@ async def _run(args):
     await tank.start()
     mcp = McpServer()
     register_tank_tools(mcp, tank)
+    photo = None
     if args.camera:
         from .camera import PhotoTool, make_camera
 
-        register_camera_tools(mcp, PhotoTool(make_camera(args.camera), mcp, ident))
+        photo = PhotoTool(make_camera(args.camera), mcp, ident)
+        register_camera_tools(mcp, photo)
         print(f"📷 摄像头：{args.camera}（需在智控台开启视觉分析）")
     session = LinxSession(
         ident,
@@ -217,6 +219,13 @@ async def _run(args):
 
         console = WebConsole(tank, session, port=args.web_port)
         listeners.append(console.publish)
+        if photo:
+            import base64
+
+            photo.on_photo = lambda jpeg, q, a: console.publish({
+                "type": "photo", "question": q, "answer": a,
+                "image": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode(),
+            })
         await console.start()
         print(f"🌐 网页控制台：{console.url}")
         webbrowser.open(console.url)

@@ -93,3 +93,26 @@ def test_take_photo_via_mcp(vision_server, tmp_path):
     out = json.loads(r["result"]["content"][0]["text"])
     assert out["success"] is True and "左边" in out["response"]
     assert photo.last_jpeg == JPEG
+
+
+def test_explain_ignores_system_proxy(vision_server, monkeypatch):
+    """开着本地代理（Clash）时，到七牛的上传和局域网快照都不能走代理。"""
+    url, _ = vision_server
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")  # 一个连不上的代理
+    monkeypatch.setenv("no_proxy", "")
+    assert explain({"url": url + "/explain2", "token": "vt"}, IDENT, JPEG, "看看") == "红色杯子在画面左边，偏 20 度"
+    assert HttpSnapshotCamera(url + "/capture").snapshot() == JPEG
+
+
+def test_on_photo_callback(vision_server, tmp_path):
+    url, _ = vision_server
+    img = tmp_path / "p.jpg"
+    img.write_bytes(JPEG)
+    mcp = McpServer()
+    photo = PhotoTool(FileCamera(str(img)), mcp, IDENT)
+    got = []
+    photo.on_photo = lambda j, q, a: got.append((j, q, a))
+    register_camera_tools(mcp, photo)
+    _call(mcp, "initialize", {"capabilities": {"vision": {"url": url + "/explain2"}}})
+    _call(mcp, "tools/call", {"name": "self.camera.take_photo", "arguments": {"question": "杯子在哪？"}}, id=2)
+    assert got == [(JPEG, "杯子在哪？", "红色杯子在画面左边，偏 20 度")]
