@@ -16,11 +16,11 @@ def register_tank_tools(mcp: McpServer, tank: TankExecutor) -> None:
     mcp.add_tool(
         "self.tank.move",
         "让小车直线前进或后退。用户说“往前走两秒”时 direction=forward、duration_ms=2000。"
-        "没说时长默认 1000 毫秒，没说速度默认 50。",
+        "没说时长默认 1000 毫秒，没说速度默认 80；用户说“慢一点”用 50，“全速/快”用 100。",
         [
             Prop("direction", "string", "forward=前进，backward=后退", enum=["forward", "backward"]),
             Prop("duration_ms", "integer", "持续毫秒数", minimum=100, maximum=5000, default=1000),
-            Prop("speed", "integer", "速度百分比", minimum=10, maximum=100, default=50),
+            Prop("speed", "integer", "速度百分比", minimum=10, maximum=100, default=80),
         ],
         tank.move,
     )
@@ -30,7 +30,7 @@ def register_tank_tools(mcp: McpServer, tank: TankExecutor) -> None:
         [
             Prop("direction", "string", "left=左转，right=右转", enum=["left", "right"]),
             Prop("duration_ms", "integer", "持续毫秒数", minimum=100, maximum=3000, default=600),
-            Prop("speed", "integer", "速度百分比", minimum=10, maximum=100, default=60),
+            Prop("speed", "integer", "速度百分比", minimum=10, maximum=100, default=80),
         ],
         tank.turn,
     )
