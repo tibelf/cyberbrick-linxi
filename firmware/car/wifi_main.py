@@ -1,7 +1,9 @@
 # -*-coding:utf-8-*-
 """Wi-Fi 控车模式（运行在车上的 MicroPython）。
 
-连上 /wifi.json 里的 2.4G 网络，监听 UDP 4210，只执行白名单指令，不执行任意代码。
+依次尝试 /wifi.json 里的 2.4G 网络；都连不上就自己开热点 CyberBrick-Tank（IP 192.168.4.1）。
+监听 UDP 4210，只执行白名单指令，不执行任意代码；同时开 WebREPL（端口 8266，带密码）供无线维护。
+/wifi.json 格式：{"networks": [{"ssid": ..., "password": ...}, ...], "admin_password": "8-9 位"}
 协议：每个 UDP 包一条 ASCII 指令，回一条应答。
   ping                  -> pong
   drive <l> <r> <ms>    l/r: -100..100，正数前进
@@ -26,6 +28,7 @@ from motors import MotorsController
 from servos import ServosController
 
 PORT = 4210
+AP_SSID = 'CyberBrick-Tank'
 MAX_MS = 6000
 TRIG_REST = 86
 TRIG_FIRE = 150
@@ -92,16 +95,23 @@ def _led(r, g, b):
 
 
 def _connect(cfg):
-    w = network.WLAN(network.STA_IF)
-    w.active(True)
-    if not w.isconnected():
-        w.connect(cfg['ssid'], cfg['password'])
+    """返回 (模式, IP)。依次连 networks，每个最多 15s；都失败就开热点。"""
+    sta = network.WLAN(network.STA_IF)
+    sta.active(True)
+    for net in cfg.get('networks', []):
+        print('[wifi] 连接', net['ssid'])
+        sta.connect(net['ssid'], net['password'])
         t0 = time.ticks_ms()
-        while not w.isconnected():
-            if time.ticks_diff(time.ticks_ms(), t0) > 20000:
-                raise OSError('连接 Wi-Fi 超时：' + cfg['ssid'])
+        while not sta.isconnected() and time.ticks_diff(time.ticks_ms(), t0) < 15000:
             time.sleep_ms(200)
-    return w.ifconfig()[0]
+        if sta.isconnected():
+            return net['ssid'], sta.ifconfig()[0]
+        sta.disconnect()
+    sta.active(False)
+    ap = network.WLAN(network.AP_IF)
+    ap.active(True)
+    ap.config(essid=AP_SSID, password=cfg['admin_password'], authmode=network.AUTH_WPA2_PSK)
+    return AP_SSID + '（热点）', ap.ifconfig()[0]
 
 
 def main():
@@ -109,9 +119,17 @@ def main():
     _led(20, 10, 0)  # 黄：正在连 Wi-Fi
     with open('/wifi.json') as f:
         cfg = json.load(f)
-    ip = _connect(cfg)
-    print('[wifi] 已连接', cfg['ssid'], 'IP', ip, 'UDP', PORT)
-    _led(0, 0, 20)  # 蓝：等待指令
+    name, ip = _connect(cfg)
+    try:
+        import webrepl
+        webrepl.start(password=cfg['admin_password'])
+    except Exception as e:
+        print('[wifi] WebREPL 启动失败', e)
+    print('[wifi] 已连接', name, 'IP', ip, 'UDP', PORT)
+    if name.startswith(AP_SSID):
+        _led(20, 0, 20)  # 紫：自己开了热点
+    else:
+        _led(0, 0, 20)  # 蓝：已连上 Wi-Fi
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(('0.0.0.0', PORT))

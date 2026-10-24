@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import sys
 import threading
+import time
 
 from . import ota
 from .identity import load_or_create
@@ -26,21 +27,46 @@ def _make_tank(args) -> TankExecutor:
     return TankExecutor(make_backend(args.backend, args.port, args.host), max_speed=args.max_speed, fire_enabled=not args.no_fire)
 
 
+def _ask_wifi_config(default_ssid: str) -> dict:
+    import getpass
+
+    networks = []
+    print("依次输入车要连的 2.4G Wi-Fi（可以多个，比如家里 + 手机热点），名称留空结束")
+    while True:
+        default = "" if networks else default_ssid
+        ssid = input(f"Wi-Fi 名称 [{default}]：").strip() or default
+        if not ssid:
+            break
+        networks.append({"ssid": ssid, "password": getpass.getpass(f"{ssid} 的密码（不回显）：")})
+    while True:
+        admin = getpass.getpass("维护密码（8-9 位，用于车的热点和无线调试）：")
+        if 8 <= len(admin) <= 9:
+            break
+        print("长度要 8-9 位（WebREPL 最多 9 位，热点至少 8 位）")
+    return {"networks": networks, "admin_password": admin}
+
+
 def cmd_wifi_setup(args):
-    """经 USB 把 Wi-Fi 控车程序写到车上；--uninstall 恢复原厂 boot.py。密码只写到车上，不落盘到仓库。"""
+    """把 Wi-Fi 控车程序写到车上。默认走 USB；--host 走 Wi-Fi（WebREPL）。密码只写到车上，不进仓库。"""
     import getpass
     import json
     from pathlib import Path
 
-    import serial
-
     from .tank.serial_repl import RawRepl, find_port, put_file, remove_file
 
     fw = Path(__file__).resolve().parents[2] / "firmware"
-    name = args.port or find_port()
-    if not name:
-        raise SystemExit("找不到车的串口，请用 USB 连上车，或用 --port 指定")
-    with serial.Serial(name, 115200, timeout=0.1) as port:
+    if args.host:
+        from .tank.webrepl import WebReplPort
+
+        port = WebReplPort(args.host, getpass.getpass("维护密码："))
+    else:
+        import serial
+
+        name = args.port or find_port()
+        if not name:
+            raise SystemExit("找不到车的串口：请用 USB 连上车，或者装车后用 --host <车的IP> 走无线")
+        port = serial.Serial(name, 115200, timeout=0.1)
+    try:
         repl = RawRepl(port, timeout=10)
         repl.enter()
         if args.uninstall:
@@ -49,14 +75,18 @@ def cmd_wifi_setup(args):
             remove_file(repl, "/app/wifi_main.py")
             print("✅ 已恢复原厂程序")
         else:
-            ssid = input(f"Wi-Fi 名称（只支持 2.4G）[{args.ssid}]：").strip() or args.ssid
-            password = getpass.getpass("Wi-Fi 密码（不回显）：")
+            if not args.code_only:
+                cfg = _ask_wifi_config(args.ssid)
+                put_file(repl, "/wifi.json", json.dumps(cfg).encode())
             put_file(repl, "/app/wifi_main.py", (fw / "car" / "wifi_main.py").read_bytes())
-            put_file(repl, "/wifi.json", json.dumps({"ssid": ssid, "password": password}).encode())
             put_file(repl, "/boot.py", (fw / "car" / "boot.py").read_bytes())
-            print(f"✅ 已写入。车重启后会连 {ssid}，灯：黄=连接中，蓝=就绪；开机时按住板载按键则进入原厂遥控")
+            print("✅ 已写入，车正在重启。灯：黄=连接中，蓝=已连上 Wi-Fi，紫=没连上、自己开了热点 CyberBrick-Tank")
+            print("   开机时按住板载按键 = 原厂遥控")
         repl.exit()
         port.write(b"import machine; machine.reset()\r\n")  # 重启后按新的 boot.py 选择模式
+        time.sleep(0.3)
+    finally:
+        port.close()
 
 
 def cmd_activate(args):
@@ -169,8 +199,10 @@ def main():
 
     sub.add_parser("list-audio", help="列出音频设备")
 
-    p_wifi = sub.add_parser("wifi-setup", help="经 USB 给车装 Wi-Fi 控车程序（--uninstall 恢复原厂）")
+    p_wifi = sub.add_parser("wifi-setup", help="给车装 Wi-Fi 控车程序（默认 USB，--host 走无线；--uninstall 恢复原厂）")
     p_wifi.add_argument("--port", help="车的串口")
+    p_wifi.add_argument("--host", help="车的 IP，走 Wi-Fi（WebREPL）而不是 USB；热点模式下是 192.168.4.1")
+    p_wifi.add_argument("--code-only", action="store_true", help="只更新车上的程序，不改 Wi-Fi 配置")
     p_wifi.add_argument("--ssid", default="CMCC-7GE2", help="2.4G Wi-Fi 名称")
     p_wifi.add_argument("--uninstall", action="store_true", help="恢复原厂 boot.py，删除 Wi-Fi 配置")
 
