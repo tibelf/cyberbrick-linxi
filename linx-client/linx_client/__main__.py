@@ -20,7 +20,7 @@ def _add_tank_args(p: argparse.ArgumentParser):
                    help="mock=不接硬件只打印，serial=USB 线控，udp=Wi-Fi 控车（先执行 wifi-setup）")
     p.add_argument("--port", help="CyberBrick 串口，如 /dev/tty.usbmodem1101 或 COM3")
     p.add_argument("--host", help="Wi-Fi 模式下车的 IP，不填则局域网广播自动查找")
-    p.add_argument("--max-speed", type=int, default=40, help="速度上限 0-100（首测建议 40）")
+    p.add_argument("--max-speed", type=int, default=100, help="速度上限 0-100（车架空首测时可设 40）")
     p.add_argument("--no-fire", action="store_true", help="锁定发射功能")
 
 
