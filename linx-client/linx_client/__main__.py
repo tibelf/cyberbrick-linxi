@@ -14,14 +14,49 @@ from .tools import register_tank_tools
 
 
 def _add_tank_args(p: argparse.ArgumentParser):
-    p.add_argument("--backend", choices=["mock", "serial"], default="mock", help="mock=不接硬件只打印")
+    p.add_argument("--backend", choices=["mock", "serial", "udp"], default="mock",
+                   help="mock=不接硬件只打印，serial=USB 线控，udp=Wi-Fi 控车（先执行 wifi-setup）")
     p.add_argument("--port", help="CyberBrick 串口，如 /dev/tty.usbmodem1101 或 COM3")
+    p.add_argument("--host", help="Wi-Fi 模式下车的 IP，不填则局域网广播自动查找")
     p.add_argument("--max-speed", type=int, default=40, help="速度上限 0-100（首测建议 40）")
     p.add_argument("--no-fire", action="store_true", help="锁定发射功能")
 
 
 def _make_tank(args) -> TankExecutor:
-    return TankExecutor(make_backend(args.backend, args.port), max_speed=args.max_speed, fire_enabled=not args.no_fire)
+    return TankExecutor(make_backend(args.backend, args.port, args.host), max_speed=args.max_speed, fire_enabled=not args.no_fire)
+
+
+def cmd_wifi_setup(args):
+    """经 USB 把 Wi-Fi 控车程序写到车上；--uninstall 恢复原厂 boot.py。密码只写到车上，不落盘到仓库。"""
+    import getpass
+    import json
+    from pathlib import Path
+
+    import serial
+
+    from .tank.serial_repl import RawRepl, find_port, put_file, remove_file
+
+    fw = Path(__file__).resolve().parents[2] / "firmware"
+    name = args.port or find_port()
+    if not name:
+        raise SystemExit("找不到车的串口，请用 USB 连上车，或用 --port 指定")
+    with serial.Serial(name, 115200, timeout=0.1) as port:
+        repl = RawRepl(port, timeout=10)
+        repl.enter()
+        if args.uninstall:
+            put_file(repl, "/boot.py", (fw / "backup-car" / "boot.py").read_bytes())
+            remove_file(repl, "/wifi.json")
+            remove_file(repl, "/app/wifi_main.py")
+            print("✅ 已恢复原厂程序")
+        else:
+            ssid = input(f"Wi-Fi 名称（只支持 2.4G）[{args.ssid}]：").strip() or args.ssid
+            password = getpass.getpass("Wi-Fi 密码（不回显）：")
+            put_file(repl, "/app/wifi_main.py", (fw / "car" / "wifi_main.py").read_bytes())
+            put_file(repl, "/wifi.json", json.dumps({"ssid": ssid, "password": password}).encode())
+            put_file(repl, "/boot.py", (fw / "car" / "boot.py").read_bytes())
+            print(f"✅ 已写入。车重启后会连 {ssid}，灯：黄=连接中，蓝=就绪；开机时按住板载按键则进入原厂遥控")
+        repl.exit()
+        port.write(b"import machine; machine.reset()\r\n")  # 重启后按新的 boot.py 选择模式
 
 
 def cmd_activate(args):
@@ -134,6 +169,11 @@ def main():
 
     sub.add_parser("list-audio", help="列出音频设备")
 
+    p_wifi = sub.add_parser("wifi-setup", help="经 USB 给车装 Wi-Fi 控车程序（--uninstall 恢复原厂）")
+    p_wifi.add_argument("--port", help="车的串口")
+    p_wifi.add_argument("--ssid", default="CMCC-7GE2", help="2.4G Wi-Fi 名称")
+    p_wifi.add_argument("--uninstall", action="store_true", help="恢复原厂 boot.py，删除 Wi-Fi 配置")
+
     args = ap.parse_args()
     if args.cmd == "activate":
         cmd_activate(args)
@@ -145,6 +185,8 @@ def main():
         asyncio.run(_run(args))
     elif args.cmd == "tank-test":
         asyncio.run(_tank_test(args))
+    elif args.cmd == "wifi-setup":
+        cmd_wifi_setup(args)
     elif args.cmd == "list-audio":
         import sounddevice as sd
 

@@ -95,6 +95,21 @@ class RawRepl:
         self.port.write(b"\x02")  # Ctrl-B 回到普通 REPL
 
 
+def put_file(repl: RawRepl, path: str, data: bytes, chunk: int = 256) -> None:
+    """经 raw REPL 把 data 写到设备上的 path（覆盖）。"""
+    import binascii
+
+    repl.exec(f"import ubinascii\n_f = open({path!r}, 'wb')")
+    for i in range(0, len(data), chunk):
+        b64 = binascii.b2a_base64(data[i : i + chunk], newline=False).decode()
+        repl.exec(f"_f.write(ubinascii.a2b_base64({b64!r}))")
+    repl.exec("_f.close()")
+
+
+def remove_file(repl: RawRepl, path: str) -> None:
+    repl.exec(f"import os\ntry:\n    os.remove({path!r})\nexcept OSError:\n    pass")
+
+
 def find_port() -> str | None:
     if os.environ.get("CYBERBRICK_PORT"):
         return os.environ["CYBERBRICK_PORT"]
