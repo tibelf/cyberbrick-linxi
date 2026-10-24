@@ -27,6 +27,8 @@ class Action:
     desc: str
     duration_ms: int
     run: Callable[[], Awaitable[None]]
+    kind: str = "other"  # forward = 纯前进；闲逛等任务据此判断两张照片之间车是不是一直在往前走
+    turn_deg: float = 0  # 转向动作转过的角度，正数左转
 
 
 class TankExecutor:
@@ -55,6 +57,10 @@ class TankExecutor:
         self._worker: asyncio.Task | None = None
         self._last_fire = 0.0
         self.persona = "normal"
+        # 给闭环任务看的运动记录：两张照片之间这两个计数都没变，说明车一直在往前走
+        self.motion_epoch = 0  # 每开始一个“不是纯前进”的动作就加 1
+        self.idle_epoch = 0  # 每次队列做空、车停下就加 1
+        self.turn_total = 0.0  # 累计转过的角度（正数左转），用来推算车头方向
 
     # ---- 生命周期 ----
     async def start(self):
@@ -72,6 +78,9 @@ class TankExecutor:
             await self._wakeup.wait()
             while self._queue:
                 action = self._queue.pop(0)
+                if action.kind != "forward":
+                    self.motion_epoch += 1
+                    self.turn_total += action.turn_deg
                 self._current_desc = action.desc
                 self._current = asyncio.create_task(action.run())
                 try:
@@ -85,6 +94,7 @@ class TankExecutor:
                 finally:
                     self._current = None
                     self._current_desc = None
+            self.idle_epoch += 1
             self._wakeup.clear()
 
     # ---- 对外接口（MCP 工具调用这些） ----
@@ -110,6 +120,15 @@ class TankExecutor:
         self._mission = asyncio.create_task(run())
         self._mission.add_done_callback(lambda t: t.cancelled() or t.exception())  # 吞掉未取出的异常警告
         return f"开始：{desc}" + (f"（已停止之前的「{replaced}」）" if replaced else "")
+
+    @property
+    def queued(self) -> int:
+        """排队中（还没开始）的动作数。"""
+        return len(self._queue)
+
+    @property
+    def busy(self) -> bool:
+        return bool(self._current or self._queue)
 
     async def wait_idle(self):
         """等队列里的动作全部做完（闭环任务每一步动完再拍下一张）。"""
@@ -137,19 +156,20 @@ class TankExecutor:
 
     def move(self, direction: str, duration_ms: int, speed: int) -> str:
         sign = 1 if direction == "forward" else -1
+        kind = "forward" if sign > 0 else "other"
         ms = min(int(duration_ms), MAX_ACTION_MS)
         name = "前进" if sign > 0 else "后退"
         if self.persona == "soldier":
             s = self._speed(100) * sign
-            return self._enqueue(Action(f"{name} {ms}ms 速度{abs(s)}（特种兵）", ms, lambda: self._drive_for(s, s, ms)))
+            return self._enqueue(Action(f"{name} {ms}ms 速度{abs(s)}（特种兵）", ms, lambda: self._drive_for(s, s, ms), kind))
         if self.persona == "grandpa":
             s = min(self._speed(speed), GRANDPA_SPEED) * sign
             total = ms + (ms // 300) * 150
-            return self._enqueue(Action(f"{name} {ms}ms 速度{abs(s)}（老爷爷）", total, lambda: self._shuffle(s, ms)))
+            return self._enqueue(Action(f"{name} {ms}ms 速度{abs(s)}（老爷爷）", total, lambda: self._shuffle(s, ms), kind))
         s = self._speed(speed) * sign
         if self.persona == "drunk":
-            return self._enqueue(Action(f"{name} {ms}ms 速度{abs(s)}（醉汉）", ms, lambda: self._stagger(s, ms)))
-        return self._enqueue(Action(f"{name} {ms}ms 速度{abs(s)}", ms, lambda: self._drive_for(s, s, ms)))
+            return self._enqueue(Action(f"{name} {ms}ms 速度{abs(s)}（醉汉）", ms, lambda: self._stagger(s, ms), kind))
+        return self._enqueue(Action(f"{name} {ms}ms 速度{abs(s)}", ms, lambda: self._drive_for(s, s, ms), kind))
 
     def turn(self, direction: str, angle: int, speed: int = 100) -> str:
         s = self._speed(speed)
@@ -159,7 +179,9 @@ class TankExecutor:
         # 原地转向：两条履带反向，比单侧履带转快一倍、几乎不画弧
         left, right = (-s, s) if direction == "left" else (s, -s)
         name = "左转" if direction == "left" else "右转"
-        return self._enqueue(Action(f"{name} {int(angle)}° {ms}ms", ms, lambda: self._drive_for(left, right, ms)))
+        deg = float(angle) if direction == "left" else -float(angle)
+        return self._enqueue(Action(f"{name} {int(angle)}° {ms}ms", ms, lambda: self._drive_for(left, right, ms),
+                                    "turn", deg))
 
     def barrel(self, direction: str, duration_ms: int) -> str:
         sp = BARREL_UP_SPEED if direction == "up" else -BARREL_UP_SPEED
