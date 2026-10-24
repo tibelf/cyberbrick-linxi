@@ -33,7 +33,7 @@
 | `t 文字` 文本调试（`listen.detect`） | ✅ 可用，平台当作用户输入处理 |
 | 麦克风语音 / 扬声器 TTS | ❓ 待用户实测 |
 | WebSocket 鉴权方式（2026-10-23 实测） | ✅ 平台**只认 `device-id`**（请求头或 URL 参数 `?device-id=` 都行），**不校验 token**：错误 token 也能完整对话并触发工具调用；只带 client-id 会被拒；未绑定的随机 MAC 也能握手。ws:// 和 wss:// 都可用。子协议传 token 无效。探测脚本思路见本条，结论可能随平台更新而变 |
-| 引脚映射 | ❓ 未在本车验证，且与官方固件的端口定义有出入（见下） |
+| 引脚映射 | ✅ 已从遥控器 `rc_config` 读出（见「已确认事实」）；❓ 哪条是左/右、方向，还要实车验证 |
 
 ## 已确认事实
 
@@ -41,7 +41,19 @@
   - USB 为 ESP32-C3 原生 `USB JTAG_serial debug unit`，VID `0x303A` / PID `0x1001`，没有 CH340/CP210x（回答了 v3 W0 的芯片疑问；Core 都是同款板，车上的大概率也一样）
   - 启动日志：`Firmware ver: 01.01.04.13`、`Loader ver: 99.00.02.51`，随后 `[MAIN]MASTER_INIT.` → `PARSE_UPDATE`（遥控器上存在 `rc_config`）→ `AUTO_SLEEP_EN.`
   - Flash 开了 **Secure Download Mode**：esptool 读不了 Flash，只能经 REPL 读文件
-  - **Ctrl-C 基本打不断原厂程序**：复位后在各个时间点连发、mpremote 都失败（mpremote 打开串口还会复位芯片）。只有第一次成功过一次（traceback 在 `rc_main.py` line 310 的 asyncio 循环里，随后进入 raw REPL），之后没能复现，触发条件未知（怀疑跟遥控器当时的状态有关，比如是否已和车连上）
+  - **Ctrl-C 打断的条件**：遥控器和车**处于配对连接状态**时，默认参数打开串口（不复位）后连发 `\x03\x03` 就能打断，进入 REPL。复位后立刻发、mpremote（打开串口会复位）、没连上车时都失败。导出脚本思路：pyserial 默认打开 → `\x03\x03` → `\x01` raw REPL → 用 base64 逐个读文件
+  - **遥控器文件已备份**到 `firmware/backup-remote/`（2026-10-24）。`app/rc_main.py` 与官方源码相同（只差 CRLF）；`control/devices/parser` 是 .mpy
+  - 遥控器上的 `rc_module` 只有 `rc_master_init / rc_master_data / rc_simulation / file_transfer / rc_index / ble_mem` 等，**没有发送自定义数据的接口**，无线协议在闭源 C 模块里。所以「电脑 → USB → 遥控器 → 车」不能直接调用现成 API，要么逆向无线协议（固件里有 `espnow`/`aioespnow` 模块），要么继续走 BLE simulation
+- **Mini T 真实接线（来自遥控器 `rc_config`，config_name `Draft_CyberBrick Mini T`，receiver_1）**：
+
+  | 遥控输入 | 执行器 | 端口 GPIO | 含义（推断） |
+  |---|---|---|---|
+  | 左摇杆 Y | MOTOR2，direction **negative** | Pin6/7 | 一侧履带（方向反装） |
+  | 右摇杆 Y | MOTOR1，positive | Pin4/5 | 另一侧履带 |
+  | 右肩摇杆 Y | PWM1，type `speed`（连续旋转舵机），推上 +45 / 推下 −45 / 回中 0 | SERVO1 = Pin3 | 炮塔转动 |
+  | 左肩按键 | PWM2，type `angle`，按下 150°、松开 86°（初始 90，范围 80–160） | SERVO2 = Pin2 | **发射扳机舵机** |
+
+  结论：当前 `BOOTSTRAP` 有两处错误：①发射不是 Pin6/7 电机，而是 **Pin2 舵机打到 150° 再回 86°**；②Pin6/7 是另一条履带（反向），不是发射。左右是哪一侧还要架空实测；炮塔是连续旋转舵机，不能按角度控制，要按「速度 + 时长」控制
 
 - 车（2026-10-24 照片）：Mini T 类履带车 + 顶部发射器；**没有外露 USB 口**；有实体遥控器；官方 CyberBrick App 能通过蓝牙连接
 - 充电（用户 2026-10-24 确认）：车能充电，但车上的充电口**不是 USB**；**遥控器带 USB 口**（可以用 USB 充电，能否传数据待测）
