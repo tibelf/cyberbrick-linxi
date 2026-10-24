@@ -22,7 +22,7 @@ BOOTSTRAP = r"""
 import sys
 if '/bbl' not in sys.path:
     sys.path.append('/bbl')
-from machine import Timer
+from machine import Timer, Pin
 from motors import MotorsController
 from servos import ServosController
 _m = MotorsController()
@@ -47,6 +47,11 @@ def turret(sp, ms):
 def fire(ms):
     _s.set_angle(2, TRIG_FIRE)
     _arm(ms)
+import neopixel
+_np = neopixel.NeoPixel(Pin(8, Pin.OUT), 1)
+def led(r, g, b):
+    _np[0] = (r, g, b)
+    _np.write()
 halt()
 print('cb-ready')
 """
@@ -168,6 +173,9 @@ class SerialBackend:
 
     async def halt(self):
         await self._exec("halt()")
+
+    async def led(self, r, g, b):
+        await self._exec(f"led({int(r)},{int(g)},{int(b)})")
 
     async def close(self):
         if self._repl:

@@ -105,6 +105,8 @@ class WebConsole:
             self.publish({"type": "info", "text": "急停"})
         elif t == "abort":
             await self.session.abort()
+        elif t == "persona":
+            self.publish({"type": "manual", "text": self.tank.set_persona(str(cmd.get("name")))})
         elif t == "text":
             text = str(cmd.get("text", "")).strip()
             if text:
