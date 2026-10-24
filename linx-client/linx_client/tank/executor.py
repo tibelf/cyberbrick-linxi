@@ -11,7 +11,7 @@ MAX_ACTION_MS = 5000
 MAX_QUEUE_MS = 15000
 FAILSAFE_SLACK_MS = 300
 MAX_TURRET_MS = 3000
-MS_PER_90_AT_FULL = 400  # 满速原地转 90° 需要的毫秒数（估计值，待实车校准）
+MS_PER_90_AT_FULL = 400  # 满速原地转 90° 需要的毫秒数（2026-10-24 实车落地实测：400ms ≈ 90°）
 TURRET_SPEED = 45  # 与原厂遥控（右肩摇杆 ±45）一致
 
 
@@ -105,7 +105,7 @@ class TankExecutor:
 
     def turn(self, direction: str, angle: int, speed: int) -> str:
         s = self._speed(speed)
-        # 原地转向的角速度近似与速度成正比；MS_PER_90_AT_FULL 需实车校准
+        # 原地转向的角速度近似与速度成正比（只在满速下校准过，低速时角度可能偏小）
         ms = min(int(int(angle) / 90 * MS_PER_90_AT_FULL * 100 / max(s, 1)), MAX_ACTION_MS)
         # 原地转向：两条履带反向，比单侧履带转快一倍、几乎不画弧
         left, right = (-s, s) if direction == "left" else (s, -s)
