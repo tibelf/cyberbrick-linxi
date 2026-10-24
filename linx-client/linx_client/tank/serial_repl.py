@@ -1,13 +1,15 @@
 """通过 USB 串口 + MicroPython raw REPL 控制 CyberBrick Core（ESP32-C3）。
 
-引脚映射（Mini T，待按车上 rc_config 确认）：
-  左履带 Pin2、右履带 Pin4(前)/Pin5(后)、炮塔舵机 Pin3(50Hz)、发射电机 Pin6/Pin7。
+接线（Mini T，来自车上 rc_config，2026-10-24 读出）：
+  MOTOR1 Pin4/5、MOTOR2 Pin6/7 = 两条履带（MOTOR2 反装，前进为负）；
+  SERVO1 Pin3 = 炮塔（连续旋转舵机，按速度转）；SERVO2 Pin2 = 发射扳机（86° 松开，150° 扣下）。
 设计要点：
+  - 直接调用车上原厂驱动 /bbl/motors.py、/bbl/servos.py，不自己拼 PWM；
   - 连接时只注入一次辅助函数，之后每条指令只发一行，延迟低；
   - 指令不阻塞（不在设备上 sleep），"停"随时能打断；
-  - 设备端用 machine.Timer 做看门狗：上位机掉线 failsafe_ms 后自动停车。
+  - 设备端用 machine.Timer 做看门狗：上位机掉线 failsafe_ms 后自动停车、扳机回位。
 
-⚠️ 引脚语义（尤其左履带"duty 0 = 前进"）未在我们的车上验证。
+⚠️ 哪条履带是左/右、炮塔正转是哪个方向，还未实车确认。
 首次使用请把车架空，运行 `python -m linx_client tank-test --backend serial` 确认方向。
 """
 
@@ -17,43 +19,35 @@ import threading
 import time
 
 BOOTSTRAP = r"""
-from machine import Pin, PWM, Timer
-_pw = {}
-def _pwm(n, f=1000):
-    p = _pw.get(n)
-    if p is None:
-        p = PWM(Pin(n), freq=f)
-        _pw[n] = p
-    return p
-def _off(n):
-    p = _pw.pop(n, None)
-    if p:
-        p.deinit()
+import sys
+if '/bbl' not in sys.path:
+    sys.path.append('/bbl')
+from machine import Timer
+from motors import MotorsController
+from servos import ServosController
+_m = MotorsController()
+_s = ServosController()
+TRIG_REST = 86
+TRIG_FIRE = 150
 def halt(*_):
-    for n in list(_pw):
-        _off(n)
+    _m.stop(1)
+    _m.stop(2)
+    _s.stop(1)
+    _s.set_angle(2, TRIG_REST)
 _wd = Timer(0)
 def _arm(ms):
     _wd.init(mode=Timer.ONE_SHOT, period=ms, callback=halt)
 def drive(l, r, ms):
-    if l > 0:
-        _pwm(2).duty(0)
-    elif l < 0:
-        _pwm(2).duty(int(-l * 10.23))
-    else:
-        _off(2)
-    if r > 0:
-        _pwm(4).duty(int(r * 10.23)); _pwm(5).duty(0)
-    elif r < 0:
-        _pwm(4).duty(0); _pwm(5).duty(int(-r * 10.23))
-    else:
-        _off(4); _off(5)
+    _m.set_speed(1, int(r * 20.47))
+    _m.set_speed(2, int(-l * 20.47))
     _arm(ms)
-def aim(a):
-    _pwm(3, 50).duty(int(a * 102 / 180 + 25))
+def turret(sp, ms):
+    _s.set_speed(1, sp)
+    _arm(ms)
 def fire(ms):
-    _pwm(6).duty(1023); _pwm(7).duty(0)
+    _s.set_angle(2, TRIG_FIRE)
     _arm(ms)
+halt()
 print('cb-ready')
 """
 
@@ -151,8 +145,8 @@ class SerialBackend:
     async def drive(self, left, right, failsafe_ms):
         await self._exec(f"drive({int(left)},{int(right)},{int(failsafe_ms)})")
 
-    async def aim(self, angle):
-        await self._exec(f"aim({int(angle)})")
+    async def turret(self, speed, failsafe_ms):
+        await self._exec(f"turret({int(speed)},{int(failsafe_ms)})")
 
     async def fire(self, pulse_ms):
         await self._exec(f"fire({int(pulse_ms)})")

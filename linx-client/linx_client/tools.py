@@ -35,10 +35,14 @@ def register_tank_tools(mcp: McpServer, tank: TankExecutor) -> None:
         tank.turn,
     )
     mcp.add_tool(
-        "self.tank.aim",
-        "调整炮管俯仰角。90 为水平，数值越大抬得越高（方向需实测确认）。用户说“抬高一点/放低一点/瞄准”时调用。",
-        [Prop("angle", "integer", "角度 0-180", minimum=0, maximum=180)],
-        tank.aim,
+        "self.tank.turret",
+        "让炮塔向左或向右水平转动一段时间（车身不动）。用户说“炮塔左转/往右瞄一点/转一下炮塔”时调用。"
+        "没说时长默认 500 毫秒。",
+        [
+            Prop("direction", "string", "left=左转，right=右转", enum=["left", "right"]),
+            Prop("duration_ms", "integer", "持续毫秒数", minimum=100, maximum=3000, default=500),
+        ],
+        tank.turret,
     )
     mcp.add_tool(
         "self.tank.fire",
@@ -48,7 +52,7 @@ def register_tank_tools(mcp: McpServer, tank: TankExecutor) -> None:
     )
     mcp.add_tool(
         "self.tank.dance",
-        "小车原地扭动并摇动炮管，表演一段舞蹈。用户说“跳个舞/庆祝一下/打个招呼”时调用。",
+        "小车原地扭动并左右摆动炮塔，表演一段舞蹈。用户说“跳个舞/庆祝一下/打个招呼”时调用。",
         [],
         tank.dance,
     )

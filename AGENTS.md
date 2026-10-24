@@ -60,7 +60,7 @@ python -m linx_client list-audio
 
 - **时长由主机控制，backend 只设状态**：`drive(left, right, failsafe_ms)` / `fire(pulse_ms)` 只设置输出并启动设备端看门狗；executor 负责 sleep 后 halt。`failsafe_ms = 时长 + 300ms`，主机崩溃或拔 USB 后设备会自己停。新增 backend（如计划中的 Wi-Fi UDP）必须保留这套语义。
 - 安全约束集中在 executor：单动作 ≤ 5s、队列总时长 ≤ 15s（超出就抛错拒绝）、速度裁剪到 `--max-speed`、发射每次 ≤ 3 发且间隔 1.5s 冷却、`--no-fire` 锁定。不要绕过 executor 直接调用 backend。
-- 引脚映射（左履带 Pin2、右履带 Pin4/5、炮塔 Pin3 @50Hz、发射 Pin6/7）为初步推测，**尚未在本车验证**，其中左履带 Pin2 与官方固件端口定义不符（见 `docs/HANDOFF.md`「已确认事实」）；以车上 `rc_config` 为准修改 `BOOTSTRAP`。raw REPL 会打断原厂程序，退出后按 Core 复位键才能恢复实体遥控。
+- 接线以车上 `rc_config` 为准（见 `docs/HANDOFF.md`「已确认事实」）：履带 MOTOR1 Pin4/5、MOTOR2 Pin6/7（反装），炮塔 SERVO1 Pin3（连续旋转舵机），发射扳机 SERVO2 Pin2（86° 松开 / 150° 扣下）；`BOOTSTRAP` 调用车上原厂驱动 `/bbl/motors.py`、`/bbl/servos.py`。左右和方向待架空实测。raw REPL 会打断原厂程序，退出后按 Core 复位键才能恢复实体遥控。
 
 ## Tests
 

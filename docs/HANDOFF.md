@@ -2,7 +2,7 @@
 
 > 每个 agent 收工前更新本文件并提交。按时间倒序记录，最新的写在最上面。规则见 `AGENTS.md`「交接协议」。
 
-**最后更新**：2026-10-24 · Claude Code（USB 连接遥控器探测）
+**最后更新**：2026-10-24 · Claude Code（车 USB 接通，BOOTSTRAP 按真实接线重写）
 
 ## 当前状态
 
@@ -16,6 +16,7 @@
 
 ## 下一步（按优先级）
 
+-3. **（2026-10-24 最新）车有 USB，已接通**。`BOOTSTRAP` 已改为调用车上原厂驱动 `/bbl/motors.py`、`/bbl/servos.py`，并在实车上注入成功（未发运动指令）。**下一步**：把车架空，执行 `cd linx-client && .venv/bin/python -m linx_client tank-test --backend serial --max-speed 40`，逐项确认：①前进时两条履带是否都向前（不对就调整 `drive` 里 MOTOR1/2 的正负号或左右对调）；②turn left 是否真的左转；③炮塔 left 是否向左转（不对就把 executor 的 `TURRET_SPEED` 取反）；④发射时扳机 150° 能否打出、能否回到 86°。之后再跑 `run --backend serial` 做语音控车
 -2. **（2026-10-24）Mini T 的 simulation JSON 对照表已写好**（v3 文档 §3.0「Mini T 动作 → simulation JSON 对照」）。抓到蓝牙日志后，逐条核对 JSON 格式和 GATT 写入内容；MOTOR2 前进是否要发负值、发射后扳机能否自动回位，都要实测
 -1. **（2026-10-24 最新）车没有外露 USB 口，改为逆向原厂蓝牙 simulation 协议**，见 v3 文档 §3.0。当前任务：让用户在 Android 上开启 HCI snoop 日志，用官方 App 的测试功能操作各执行器，再用 `adb bugreport` 导出日志分析 GATT 和 JSON 格式。官方源码可以 clone `CyberBrick-Official/CyberBrick_Controller_Core` 查看
 0. **主线已切换到 v3 纯网页版**（见 `docs/技术方案-v3-网页版.md`），按 W0→W5 推进。W0：①接上 Core，查 USB 芯片类型/VID，测试 Android Chrome + web-serial-polyfill 能否进入 raw REPL；②在电脑 Chrome 里做最小页面，验证麦克风 16k PCM → 灵矽 stt
@@ -34,7 +35,7 @@
 | `t 文字` 文本调试（`listen.detect`） | ✅ 可用，平台当作用户输入处理 |
 | 麦克风语音 / 扬声器 TTS | ❓ 待用户实测 |
 | WebSocket 鉴权方式（2026-10-23 实测） | ✅ 平台**只认 `device-id`**（请求头或 URL 参数 `?device-id=` 都行），**不校验 token**：错误 token 也能完整对话并触发工具调用；只带 client-id 会被拒；未绑定的随机 MAC 也能握手。ws:// 和 wss:// 都可用。子协议传 token 无效。探测脚本思路见本条，结论可能随平台更新而变 |
-| 引脚映射 | ✅ 已从遥控器 `rc_config` 读出（见「已确认事实」）；❓ 哪条是左/右、方向，还要实车验证 |
+| 引脚映射 | ✅ 已从遥控器和车的 `rc_config` 读出（两者相同），`BOOTSTRAP` 已按此重写（见「已确认事实」）；❓ 哪条是左/右、方向，还要实车验证 |
 
 ## 已确认事实
 
@@ -56,7 +57,7 @@
 
   结论：当前 `BOOTSTRAP` 有两处错误：①发射不是 Pin6/7 电机，而是 **Pin2 舵机打到 150° 再回 86°**；②Pin6/7 是另一条履带（反向），不是发射。左右是哪一侧还要架空实测；炮塔是连续旋转舵机，不能按角度控制，要按「速度 + 时长」控制
 
-- 车（2026-10-24 照片）：Mini T 类履带车 + 顶部发射器；**没有外露 USB 口**；有实体遥控器；官方 CyberBrick App 能通过蓝牙连接
+- 车（2026-10-24）：Mini T 类履带车 + 顶部发射器；**有 USB 口**（之前记成没有，用户已更正），接 Mac 后是 `USB JTAG_serial debug unit`；连接时用默认参数打开串口、连发 `\x03\x03`，一次就能打断原厂程序。车上文件已备份到 `firmware/backup-car/`，与遥控器上的**完全相同**（含 `rc_config`），所以接线表对车同样成立；有实体遥控器；官方 CyberBrick App 能通过蓝牙连接
 - 充电（用户 2026-10-24 确认）：车能充电，但车上的充电口**不是 USB**；**遥控器带 USB 口**（可以用 USB 充电，能否传数据待测）
 - 官方文档 `docs/cyberbrick_core/quickref.rst`：每块 Core 都**自带 USB-C 口**，MicroPython REPL 就在这个口上（USB-Serial/JTAG，GPIO18/19，115200）。所以车上的 Core 应该也有 USB-C，只是被车壳挡住了，拆开才能接
 - 官方 `rc_module` 文档（`docs/cyberbrick_core/lib/rc_module.rst`）：`rc_simulation()` 的指令"通常来自 PC 或 App"，`file_transfer()` 也支持"CyberBrick App 或 PC 客户端"同步 `rc_config`。也就是说官方另有一条 PC 通道，具体走哪条链路待查
@@ -82,6 +83,8 @@
 - 比赛日期和演示形式
 
 ## 决策记录
+
+- **2026-10-24**：车有 USB，控车回到「USB raw REPL」主线。`BOOTSTRAP` 不再自己拼 PWM，而是调用车上的原厂驱动（H 桥刹车、舵机占空比都由官方实现）。炮塔是连续旋转舵机，所以工具 `self.tank.aim(angle)` 改为 `self.tank.turret(direction, duration_ms)`，速度固定为 45，与原厂遥控一致；后端接口相应从 `aim(angle)` 改为 `turret(speed, failsafe_ms)`，保留 failsafe 语义。`halt()` 会刹停两条履带、停炮塔，并让扳机回到 86°
 
 - **2026-10-23**：主线改为纯网页版（用户有 Android 手机）。控车有线（WebUSB + raw REPL，车上固件不用改）和无线（Web Bluetooth + BLE 白名单固件）都要做，先做有线。依据：实测平台只认 device-id、OTA 接口允许跨域、下行音频是 PCM
 
