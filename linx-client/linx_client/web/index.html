@@ -66,6 +66,9 @@
   .event.result { background: transparent; color: var(--muted); padding-left: 22px; }
   .event.error { background: var(--bad-soft); color: var(--bad); }
   .event.info { background: var(--bot); color: var(--muted); }
+  .photo { align-self: flex-start; margin: 0; max-width: 78%; }
+  .photo img { display: block; max-width: 100%; max-height: 260px; border-radius: 8px; border: 1px solid var(--line); }
+  .photo figcaption { font-size: 13px; color: var(--muted); white-space: pre-wrap; margin-top: 4px; }
   form.input { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
   form.input input {
     flex: 1; min-width: 0; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
@@ -209,10 +212,24 @@ function add(cls, text, who) {
   if (stick) log.scrollTop = log.scrollHeight;
 }
 
+function addPhoto(e) {
+  $("empty")?.remove();
+  const fig = document.createElement("figure");
+  fig.className = "photo";
+  const img = document.createElement("img");
+  img.src = e.image;
+  img.alt = e.question;
+  const cap = document.createElement("figcaption");
+  cap.textContent = `📷 ${e.question}\n→ ${e.answer}`;
+  fig.append(img, cap);
+  log.appendChild(fig);
+  log.scrollTop = log.scrollHeight;
+}
+
 const TOOL_NAMES = {
   "self.tank.move": "移动", "self.tank.turn": "转向", "self.tank.barrel": "炮管",
   "self.tank.fire": "开火", "self.tank.stop": "停车", "self.tank.dance": "跳舞",
-  "self.get_device_status": "查询状态", "self.tank.set_persona": "切换人格",
+  "self.get_device_status": "查询状态", "self.camera.take_photo": "拍照", "self.tank.set_persona": "切换人格",
 };
 
 // 平台连上后会自动查询状态，属于后台行为，不在对话里显示
@@ -230,6 +247,7 @@ function render(e) {
     }
     case "tool_result": add(e.error ? "event error" : "event result", "→ " + e.text); break;
     case "manual": add("event", "🕹 " + e.text); break;
+    case "photo": addPhoto(e); break;
     case "info": add("event info", e.text); break;
     case "error": add("event error", "⚠ " + e.text); break;
   }

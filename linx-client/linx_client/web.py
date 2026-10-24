@@ -53,7 +53,7 @@ class WebConsole:
         """LinxSession 的 on_event 回调（在事件循环线程里调用）。"""
         if event.get("type") == "conn":
             self.conn_state = event["state"]
-        elif event.get("type") != "speaking":
+        elif event.get("type") not in ("speaking", "photo"):  # 照片太大，不进历史
             self.history.append(event)
         self._broadcast(event)
 

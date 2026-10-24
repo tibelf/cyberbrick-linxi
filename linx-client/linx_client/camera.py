@@ -21,6 +21,8 @@ from typing import Protocol
 from .identity import Identity
 
 MAX_WIDTH = 640  # 缩小再上传：分析够用，上传快
+# 不走系统代理：本地代理（如 Clash）会掐断到七牛国内节点的连接，局域网的车载摄像头也不该走代理
+_NO_PROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 class Camera(Protocol):
@@ -64,7 +66,7 @@ class HttpSnapshotCamera:
         self.timeout = timeout
 
     def snapshot(self) -> bytes:
-        with urllib.request.urlopen(self.url, timeout=self.timeout) as resp:
+        with _NO_PROXY.open(self.url, timeout=self.timeout) as resp:
             data = resp.read()
         if not data.startswith(b"\xff\xd8"):
             raise RuntimeError(f"{self.url} 返回的不是 JPEG")
@@ -110,7 +112,7 @@ def explain(vision: dict, ident: Identity, jpeg: bytes, question: str, timeout: 
     if vision.get("token"):
         headers["Authorization"] = f"Bearer {vision['token']}"
     req = urllib.request.Request(vision["url"], data=body, method="POST", headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with _NO_PROXY.open(req, timeout=timeout) as resp:
         raw = resp.read().decode("utf-8", "replace")
     try:
         data = json.loads(raw)
@@ -130,6 +132,7 @@ class PhotoTool:
         self.ident = ident
         self.last_jpeg: bytes | None = None
         self.last_answer: str | None = None
+        self.on_photo = None  # 网页控制台订阅：(jpeg, question, answer)
 
     async def __call__(self, question: str) -> str:
         vision = self.mcp.vision
@@ -140,5 +143,7 @@ class PhotoTool:
         answer = await asyncio.to_thread(explain, vision, self.ident, jpeg, question)
         self.last_jpeg, self.last_answer = jpeg, answer
         print(f"📷 {question} → {answer}（{time.monotonic() - t0:.1f}s）")
+        if self.on_photo:
+            self.on_photo(jpeg, question, answer)
         # 与小智设备一致：把视觉接口的结果原样交给平台
         return json.dumps({"success": True, "action": "RESPONSE", "response": answer}, ensure_ascii=False)

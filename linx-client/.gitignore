@@ -4,3 +4,4 @@ __pycache__/
 .venv/
 .car_admin_password
 .car_host
+camera-test*.jpg
