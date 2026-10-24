@@ -2,7 +2,7 @@
 
 > 每个 agent 收工前更新本文件并提交。按时间倒序记录，最新的写在最上面。规则见 `AGENTS.md`「交接协议」。
 
-**最后更新**：2026-10-23 · Claude Code（车型确认 + 官方端口对照）
+**最后更新**：2026-10-24 · Claude Code（USB 连接遥控器探测）
 
 ## 当前状态
 
@@ -36,6 +36,12 @@
 | 引脚映射 | ❓ 未在本车验证，且与官方固件的端口定义有出入（见下） |
 
 ## 已确认事实
+
+- **遥控器 USB 探测（2026-10-24 实测，遥控器接 Mac）**：
+  - USB 为 ESP32-C3 原生 `USB JTAG_serial debug unit`，VID `0x303A` / PID `0x1001`，没有 CH340/CP210x（回答了 v3 W0 的芯片疑问；Core 都是同款板，车上的大概率也一样）
+  - 启动日志：`Firmware ver: 01.01.04.13`、`Loader ver: 99.00.02.51`，随后 `[MAIN]MASTER_INIT.` → `PARSE_UPDATE`（遥控器上存在 `rc_config`）→ `AUTO_SLEEP_EN.`
+  - Flash 开了 **Secure Download Mode**：esptool 读不了 Flash，只能经 REPL 读文件
+  - **Ctrl-C 基本打不断原厂程序**：复位后在各个时间点连发、mpremote 都失败（mpremote 打开串口还会复位芯片）。只有第一次成功过一次（traceback 在 `rc_main.py` line 310 的 asyncio 循环里，随后进入 raw REPL），之后没能复现，触发条件未知（怀疑跟遥控器当时的状态有关，比如是否已和车连上）
 
 - 车（2026-10-24 照片）：Mini T 类履带车 + 顶部发射器；**没有外露 USB 口**；有实体遥控器；官方 CyberBrick App 能通过蓝牙连接
 - 充电（用户 2026-10-24 确认）：车能充电，但车上的充电口**不是 USB**；**遥控器带 USB 口**（可以用 USB 充电，能否传数据待测）
