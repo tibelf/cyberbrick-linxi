@@ -83,12 +83,24 @@ def car_main(monkeypatch):
     machine = types.ModuleType("machine")
     machine.Timer = lambda n: types.SimpleNamespace(init=lambda **k: log.append(("timer", k["period"])), ONE_SHOT=0)
     machine.Timer.ONE_SHOT = 0
-    machine.Pin = object
+    machine.Pin = lambda *a, **k: None
+    machine.Pin.OUT = 0
+    neopixel = types.ModuleType("neopixel")
+
+    class _NP(list):
+        def __init__(self, pin, n):
+            super().__init__([None] * n)
+
+        def write(self):
+            log.append(("np", self[0]))
+
+    neopixel.NeoPixel = _NP
     motors = types.ModuleType("motors")
     motors.MotorsController = lambda: _Rec(log, "m")
     servos = types.ModuleType("servos")
     servos.ServosController = lambda: _Rec(log, "s")
-    for name, mod in {"machine": machine, "motors": motors, "servos": servos, "network": types.ModuleType("network")}.items():
+    for name, mod in {"machine": machine, "motors": motors, "servos": servos, "neopixel": neopixel,
+                      "network": types.ModuleType("network")}.items():
         monkeypatch.setitem(sys.modules, name, mod)
     path = Path(__file__).resolve().parents[2] / "firmware" / "car" / "wifi_main.py"
     spec = importlib.util.spec_from_file_location("wifi_main", path)
@@ -108,6 +120,9 @@ def test_car_handle(car_main):
     assert log == [("m", "set_speed", 1, 0), ("m", "set_speed", 2, -2047), ("timer", 6000)]
     assert mod.handle("fire x") == "err 参数不是整数"
     assert mod.handle("exec('import os')") == "err 未知指令"
+    log.clear()
+    assert mod.handle("led 300 -5 20") == "ok"  # 颜色裁剪到 0-255
+    assert log == [("np", (255, 0, 20))]
     log.clear()
     assert mod.handle("halt") == "ok"
     assert ("s", "set_angle", 2, 86) in log

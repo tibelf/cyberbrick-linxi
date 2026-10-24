@@ -89,6 +89,8 @@
   }
   .stop:hover { filter: brightness(1.08); border-color: var(--bad); }
   .seg { display: flex; background: var(--bg); border-radius: 8px; padding: 3px; margin-bottom: 14px; }
+  .seg { flex-wrap: wrap; }
+  #persona { margin-bottom: 0; }
   .seg button { flex: 1; border: 0; background: transparent; padding: 6px; font-size: 14px; color: var(--muted); }
   .seg button.on { background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
   .mic {
@@ -146,6 +148,16 @@
     </div>
 
     <div class="card section">
+      <h2>人格</h2>
+      <div class="seg" id="persona">
+        <button data-persona="normal" class="on">正常</button>
+        <button data-persona="soldier">特种兵</button>
+        <button data-persona="grandpa">老爷爷</button>
+        <button data-persona="drunk">醉汉</button>
+      </div>
+    </div>
+
+    <div class="card section">
       <h2>手动控制</h2>
       <div class="pad">
         <button data-action="barrel_up">炮管 ↑</button>
@@ -200,7 +212,7 @@ function add(cls, text, who) {
 const TOOL_NAMES = {
   "self.tank.move": "移动", "self.tank.turn": "转向", "self.tank.barrel": "炮管",
   "self.tank.fire": "开火", "self.tank.stop": "停车", "self.tank.dance": "跳舞",
-  "self.get_device_status": "查询状态",
+  "self.get_device_status": "查询状态", "self.tank.set_persona": "切换人格",
 };
 
 // 平台连上后会自动查询状态，属于后台行为，不在对话里显示
@@ -229,7 +241,11 @@ function setConn(state) {
   el.textContent = { connected: "已连接灵矽", connecting: "连接中", disconnected: "已断开", offline: "控制台离线" }[state] || state;
 }
 
+const PERSONA_KEYS = { "正常": "normal", "特种兵": "soldier", "老爷爷": "grandpa", "醉汉": "drunk" };
+
 function setStatus(s) {
+  const p = PERSONA_KEYS[s.persona];
+  document.querySelectorAll("#persona button").forEach((b) => b.classList.toggle("on", b.dataset.persona === p));
   $("s-current").textContent = s.current || "空闲";
   $("s-queued").textContent = s.queued.length ? s.queued.join("、") : "0";
   $("s-speed").textContent = s.max_speed + "%";
@@ -287,6 +303,10 @@ $("form").onsubmit = (ev) => {
 // 手动控制
 document.querySelectorAll("[data-action]").forEach((b) => {
   b.onclick = () => send({ type: "action", name: b.dataset.action });
+});
+
+document.querySelectorAll("#persona button").forEach((b) => {
+  b.onclick = () => send({ type: "persona", name: b.dataset.persona });
 });
 
 // 麦克风：常开模式点击切换静音；按住说话模式按下开、松开关

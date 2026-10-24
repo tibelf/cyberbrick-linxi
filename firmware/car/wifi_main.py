@@ -12,6 +12,7 @@
   turret <sp> <ms>      sp: -100..100，0 为停
   fire <ms>             扣扳机，ms 后看门狗回位
   halt                  -> ok
+  led <r> <g> <b>       车灯颜色 0-255
 成功回 ok，失败回 err <原因>。
 时长语义与 USB 版 BOOTSTRAP 相同：指令只设状态并启动看门狗，到点自动 halt；
 主机掉线或 Wi-Fi 断开时，车会在最后一条指令的 ms 到期后自己停下。
@@ -83,6 +84,9 @@ def handle(line):
         if cmd == 'fire' and len(args) == 1:
             _s.set_angle(2, TRIG_FIRE)
             _arm(_clip(args[0], 1, MAX_MS))
+            return 'ok'
+        if cmd == 'led' and len(args) == 3:
+            _led(*(_clip(a, 0, 255) for a in args))
             return 'ok'
     except ValueError:
         return 'err 参数不是整数'

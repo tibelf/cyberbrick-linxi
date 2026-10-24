@@ -10,7 +10,7 @@ import math
 from typing import Callable
 
 from websockets.asyncio.client import ClientConnection, connect
-from websockets.exceptions import WebSocketException
+from websockets.exceptions import ConnectionClosed, WebSocketException
 
 from .audio import IN_FRAME_MS, IN_RATE
 from .identity import Identity
@@ -278,4 +278,7 @@ class LinxSession:
 
     async def _send_json(self, obj: dict):
         if self.ws is not None:
-            await self.ws.send(json.dumps(obj, ensure_ascii=False))
+            try:
+                await self.ws.send(json.dumps(obj, ensure_ascii=False))
+            except ConnectionClosed:
+                pass  # 连接刚断（比如被同一 Device-Id 的另一个客户端挤掉），重连后平台会重新下发

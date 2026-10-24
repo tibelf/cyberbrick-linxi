@@ -199,16 +199,23 @@ async def _run(args):
         speaker_device=args.speaker,
         barge_in_level=args.barge_in_level,
     )
+    listeners = []
+    if not args.no_mood:
+        from .tank.mood import Mood
+
+        mood = Mood(tank)
+        listeners.append(lambda e: e.get("type") == "emotion" and mood.on_emotion(e.get("emotion")))
     if args.web:
         import webbrowser
 
         from .web import WebConsole
 
         console = WebConsole(tank, session, port=args.web_port)
-        session.on_event = console.publish
+        listeners.append(console.publish)
         await console.start()
         print(f"🌐 网页控制台：{console.url}")
         webbrowser.open(console.url)
+    session.on_event = lambda e: [listen(e) for listen in listeners]
     done = asyncio.Event()
     _start_console(asyncio.get_running_loop(), tank, session, done)
     runner = asyncio.create_task(session.run_forever())
@@ -260,6 +267,7 @@ def main():
     p_run.add_argument("--speaker", help="扬声器设备名或序号")
     p_run.add_argument("--ws-url", help="覆盖 WebSocket 地址")
     p_run.add_argument("--token", help="直接指定 token，跳过 OTA")
+    p_run.add_argument("--no-mood", action="store_true", help="关闭情绪肢体语言（回复时的小动作和车灯）")
     p_run.add_argument("--web", action="store_true", help="同时打开网页控制台（对话记录、急停、按住说话、手动控车）")
     p_run.add_argument("--web-port", type=int, default=8080, help="网页控制台端口")
 

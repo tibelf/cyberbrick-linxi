@@ -20,7 +20,10 @@ class TankBackend(Protocol):
         """扣下扳机（一发），failsafe 到点自动回位。"""
 
     async def halt(self) -> None:
-        """立刻关闭所有输出。"""
+        """立刻关闭所有输出（不影响车灯）。"""
+
+    async def led(self, r: int, g: int, b: int) -> None:
+        """车灯颜色（0-255），纯装饰。"""
 
     async def close(self) -> None: ...
 
@@ -51,6 +54,9 @@ class MockBackend:
 
     async def halt(self):
         self._log("halt")
+
+    async def led(self, r, g, b):
+        self._log("led", r, g, b)
 
     async def close(self):
         self._log("close")

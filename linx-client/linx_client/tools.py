@@ -50,6 +50,15 @@ def register_tank_tools(mcp: McpServer, tank: TankExecutor) -> None:
         tank.fire,
     )
     mcp.add_tool(
+        "self.tank.set_persona",
+        "切换小车的人格。用户说“切换成特种兵/老爷爷/醉汉模式”“恢复正常”时调用。"
+        "切换后你的说话风格也要跟着变：特种兵简短干脆、带军事口令；老爷爷慢悠悠、爱唠叨；醉汉说话含糊、颠三倒四。"
+        "走路风格由小车自动调整：特种兵全速冲刺，老爷爷慢慢走走停停，醉汉歪歪扭扭走 S 形。",
+        [Prop("persona", "string", "normal=正常，soldier=特种兵，grandpa=老爷爷，drunk=醉汉",
+              enum=["normal", "soldier", "grandpa", "drunk"])],
+        tank.set_persona,
+    )
+    mcp.add_tool(
         "self.tank.dance",
         "小车原地扭动并上下摆动炮管，表演一段舞蹈。用户说“跳个舞/庆祝一下/打个招呼”时调用。",
         [],

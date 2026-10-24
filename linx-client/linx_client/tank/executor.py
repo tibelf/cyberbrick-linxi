@@ -15,6 +15,11 @@ MAX_BARREL_MS = 1500  # 俯仰有机械限位，转太久会顶住舵机
 # 炮管俯仰是 SERVO1 上的连续旋转舵机（原厂右肩摇杆上下控制），速度 45 与原厂一致；
 # 正负号决定哪边是“抬高”，2026-10-24 实车发现装反过一次，以实测为准
 BARREL_UP_SPEED = 45
+GRANDPA_SPEED = 65  # 老爷爷模式的速度上限；再低落地就带不动履带（40% 实测带不动）
+
+# 人格只改变前进/后退的风格；转向按满速校准过角度，不受人格影响
+PERSONAS = {"normal": "正常", "soldier": "特种兵", "grandpa": "老爷爷", "drunk": "醉汉"}
+EMOTES = {"happy": "开心", "angry": "生气", "sad": "难过", "surprised": "惊讶", "thinking": "思考"}
 
 
 @dataclass
@@ -47,6 +52,7 @@ class TankExecutor:
         self._current_desc: str | None = None
         self._worker: asyncio.Task | None = None
         self._last_fire = 0.0
+        self.persona = "normal"
 
     # ---- 生命周期 ----
     async def start(self):
@@ -100,9 +106,18 @@ class TankExecutor:
 
     def move(self, direction: str, duration_ms: int, speed: int) -> str:
         sign = 1 if direction == "forward" else -1
-        s = self._speed(speed) * sign
         ms = min(int(duration_ms), MAX_ACTION_MS)
         name = "前进" if sign > 0 else "后退"
+        if self.persona == "soldier":
+            s = self._speed(100) * sign
+            return self._enqueue(Action(f"{name} {ms}ms 速度{abs(s)}（特种兵）", ms, lambda: self._drive_for(s, s, ms)))
+        if self.persona == "grandpa":
+            s = min(self._speed(speed), GRANDPA_SPEED) * sign
+            total = ms + (ms // 300) * 150
+            return self._enqueue(Action(f"{name} {ms}ms 速度{abs(s)}（老爷爷）", total, lambda: self._shuffle(s, ms)))
+        s = self._speed(speed) * sign
+        if self.persona == "drunk":
+            return self._enqueue(Action(f"{name} {ms}ms 速度{abs(s)}（醉汉）", ms, lambda: self._stagger(s, ms)))
         return self._enqueue(Action(f"{name} {ms}ms 速度{abs(s)}", ms, lambda: self._drive_for(s, s, ms)))
 
     def turn(self, direction: str, angle: int, speed: int = 100) -> str:
@@ -139,6 +154,43 @@ class TankExecutor:
 
         return self._enqueue(Action("跳舞", 2400, run))
 
+    def set_persona(self, persona: str) -> str:
+        if persona not in PERSONAS:
+            raise ValueError(f"没有这个人格：{persona}")
+        self.persona = persona
+        return f"已切换为{PERSONAS[persona]}模式"
+
+    def emote(self, kind: str) -> str | None:
+        """情绪小动作。车正忙（有动作在做或在排队）时跳过，不打扰正事；动作都成对抵消，车和炮管回到原位。"""
+        if kind not in EMOTES or self._current or self._queue:
+            return None
+        s = self._speed(100)
+        moves = {
+            "happy": [("drive", -s, s, 120), ("drive", s, -s, 240), ("drive", -s, s, 120)],  # 原地扭一扭
+            "angry": [("barrel", BARREL_UP_SPEED, 300), ("drive", s, s, 150), ("drive", -s, -s, 150),
+                      ("barrel", -BARREL_UP_SPEED, 300)],  # 炮管抬起、往前一冲
+            "sad": [("barrel", -BARREL_UP_SPEED, 300), ("drive", -s, -s, 200), ("drive", s, s, 200),
+                    ("barrel", BARREL_UP_SPEED, 300)],  # 炮管耷拉、缩一下
+            "surprised": [("drive", -s, -s, 150), ("drive", s, s, 150)],  # 往后一缩
+            "thinking": [("barrel", BARREL_UP_SPEED, 150), ("barrel", -BARREL_UP_SPEED, 150)] * 2,  # 点头琢磨
+        }[kind]
+
+        async def run():
+            for m in moves:
+                if m[0] == "drive":
+                    await self._drive_for(m[1], m[2], m[3])
+                else:
+                    await self._barrel_for(m[1], m[2])
+
+        return self._enqueue(Action(f"情绪：{EMOTES[kind]}", sum(m[-1] for m in moves), run))
+
+    async def led(self, r: int, g: int, b: int):
+        """车灯颜色。纯装饰：车上程序不支持或网络出错都忽略，不影响控车。"""
+        try:
+            await self.backend.led(r, g, b)
+        except Exception:  # noqa: BLE001
+            pass
+
     def status(self) -> dict:
         return {
             "current": self._current_desc,
@@ -146,6 +198,7 @@ class TankExecutor:
             "max_speed": self.max_speed,
             "fire_enabled": self.fire_enabled,
             "shots_fired": self.shots_fired,
+            "persona": PERSONAS[self.persona],
         }
 
     # ---- 内部 ----
@@ -153,6 +206,31 @@ class TankExecutor:
         try:
             await self.backend.drive(left, right, ms + FAILSAFE_SLACK_MS)
             await asyncio.sleep(ms / 1000)
+        finally:
+            await self._safe_halt()
+
+    async def _shuffle(self, s: int, ms: int):
+        """老爷爷：每走 300ms 歇 150ms。"""
+        left = ms
+        while left > 0:
+            step = min(300, left)
+            await self._drive_for(s, s, step)
+            left -= step
+            if left > 0:
+                await asyncio.sleep(0.15)
+
+    async def _stagger(self, s: int, ms: int):
+        """醉汉：左右履带一快一慢交替，走成 S 形。"""
+        weak = int(s * 0.4)
+        left, i = ms, 0
+        try:
+            while left > 0:
+                step = min(250, left)
+                l, r = (s, weak) if i % 2 == 0 else (weak, s)
+                await self.backend.drive(l, r, step + FAILSAFE_SLACK_MS)
+                await asyncio.sleep(step / 1000)
+                left -= step
+                i += 1
         finally:
             await self._safe_halt()
 

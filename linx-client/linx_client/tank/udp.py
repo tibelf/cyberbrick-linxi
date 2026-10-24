@@ -118,6 +118,9 @@ class UdpBackend:
     async def halt(self):
         await self._send("halt")
 
+    async def led(self, r, g, b):
+        await self._send(f"led {int(r)} {int(g)} {int(b)}")
+
     async def close(self):
         if self._sock:
             try:
