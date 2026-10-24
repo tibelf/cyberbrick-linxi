@@ -42,7 +42,7 @@ python -m linx_client wifi-setup [--host IP] [--code-only|--uninstall]  # 给车
 python -m linx_client car-exec --host IP "print(1)" # 无线在车上执行代码（维护密码读 .car_admin_password）
 python -m linx_client tank-test --backend serial    # 逐步测试每个动作（车先架空）
 python -m linx_client camera-test --camera 0        # 拍一张存成 camera-test.jpg，检查摄像头
-python -m linx_client run --backend udp --camera 0  # 加拍照工具 self.camera.take_photo（需智控台开启视觉分析）
+python -m linx_client run --backend udp --camera 0  # 加拍照工具 self.camera.take_photo（需智控台开启视觉分析；默认俯视 --camera-view overhead，车载用 front）
 python -m linx_client list-audio
 ```
 
