@@ -1,4 +1,4 @@
-"""命令行入口：python -m linx_client {activate,run,tank-test,list-audio}"""
+"""命令行入口：python -m linx_client {activate,run,tank-test,camera-test,list-audio,wifi-setup,car-exec}"""
 
 import argparse
 import asyncio
@@ -12,7 +12,7 @@ from .identity import load_or_create
 from .mcp import McpServer
 from .session import LinxSession
 from .tank import TankExecutor, make_backend
-from .tools import register_tank_tools
+from .tools import register_camera_tools, register_tank_tools
 
 
 def _add_tank_args(p: argparse.ArgumentParser):
@@ -188,6 +188,11 @@ async def _run(args):
     await tank.start()
     mcp = McpServer()
     register_tank_tools(mcp, tank)
+    if args.camera:
+        from .camera import PhotoTool, make_camera
+
+        register_camera_tools(mcp, PhotoTool(make_camera(args.camera), mcp, ident))
+        print(f"📷 摄像头：{args.camera}（需在智控台开启视觉分析）")
     session = LinxSession(
         ident,
         mcp,
@@ -270,6 +275,11 @@ def main():
     p_run.add_argument("--no-mood", action="store_true", help="关闭情绪肢体语言（回复时的小动作和车灯）")
     p_run.add_argument("--web", action="store_true", help="同时打开网页控制台（对话记录、急停、按住说话、手动控车）")
     p_run.add_argument("--web-port", type=int, default=8080, help="网页控制台端口")
+    p_run.add_argument("--camera", help="开启拍照工具：0=电脑摄像头序号，http://…=JPEG 快照地址，其他=图片文件")
+
+    p_cam = sub.add_parser("camera-test", help="拍一张照片存成文件，检查摄像头（不连平台）")
+    p_cam.add_argument("--camera", default="0", help="同 run --camera")
+    p_cam.add_argument("--out", default="camera-test.jpg", help="保存路径")
 
     p_test = sub.add_parser("tank-test", help="逐步测试小车动作（先把车架空！）")
     _add_tank_args(p_test)
@@ -300,6 +310,13 @@ def main():
         asyncio.run(_run(args))
     elif args.cmd == "tank-test":
         asyncio.run(_tank_test(args))
+    elif args.cmd == "camera-test":
+        from .camera import make_camera
+
+        jpeg = make_camera(args.camera).snapshot()
+        with open(args.out, "wb") as f:
+            f.write(jpeg)
+        print(f"📷 已保存 {args.out}（{len(jpeg) // 1024} KB）")
     elif args.cmd == "car-exec":
         cmd_car_exec(args)
     elif args.cmd == "wifi-setup":

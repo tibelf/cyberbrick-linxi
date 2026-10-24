@@ -41,6 +41,8 @@ python -m linx_client run --backend udp --web       # Wi-Fi 控车 + 网页控�
 python -m linx_client wifi-setup [--host IP] [--code-only|--uninstall]  # 给车装/更新/卸载 Wi-Fi 控车程序
 python -m linx_client car-exec --host IP "print(1)" # 无线在车上执行代码（维护密码读 .car_admin_password）
 python -m linx_client tank-test --backend serial    # 逐步测试每个动作（车先架空）
+python -m linx_client camera-test --camera 0        # 拍一张存成 camera-test.jpg，检查摄像头
+python -m linx_client run --backend udp --camera 0  # 加拍照工具 self.camera.take_photo（需智控台开启视觉分析）
 python -m linx_client list-audio
 ```
 
@@ -56,6 +58,7 @@ python -m linx_client list-audio
    - `mcp.py`：设备端 MCP 服务（平台是客户端），消息封装为 `{"type":"mcp","payload":<JSON-RPC>}`。参数只用 integer/string/boolean；`Prop.coerce` 会把整数裁剪到 min/max。工具异常一律转成 `isError` 结果返回，绝不让连接断掉。
    - `tools.py`：工具名、描述、参数 schema。**描述文字直接决定大模型何时调用**（如 fire 只在用户明确要求时调用）。
    - `tank/executor.py`：动作队列。工具调用**立即返回「已安排」**，动作在后台 worker 中顺序执行，因此多次调用会自然串成序列。`stop()` 不进队列：清空队列、取消当前动作、halt。
+   - `camera.py`：拍照工具。取图来源 `--camera`（数字=电脑摄像头 OpenCV，http=JPEG 快照地址如车载 ESP32S3，其他=文件）；视觉接口 url/token 来自 MCP initialize 的 `capabilities.vision`（`McpServer.vision`），字段 `question` + `file`（camera.jpg）
    - `tank/backend.py` 定义 `TankBackend` Protocol + `MockBackend`；`serial_repl.py` 是实车驱动。
 3. **CyberBrick Core（执行和保底）**：`serial_repl.py` 连接时进入 raw REPL，一次性注入 `BOOTSTRAP`（定义 `drive/aim/fire/halt` + `machine.Timer` 看门狗），之后每条指令只发一行函数调用，设备端不 sleep。
 

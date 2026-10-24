@@ -2,7 +2,7 @@
 
 > 每个 agent 收工前更新本文件并提交。按时间倒序记录，最新的写在最上面。规则见 `AGENTS.md`「交接协议」。
 
-**最后更新**：2026-10-24 · Claude Code（车 USB 接通，BOOTSTRAP 按真实接线重写）
+**最后更新**：2026-10-25 · Claude Code（拍照工具）；之前：2026-10-24 · Claude Code（车 USB 接通，BOOTSTRAP 按真实接线重写）
 
 ## 当前状态
 
@@ -12,6 +12,7 @@
 
 ## 进行中
 
+- **（2026-10-25）拍照工具 `self.camera.take_photo` 已实现**：`linx_client/camera.py` + `tools.register_camera_tools`，`run --camera <来源>` 启用（不加就不注册这个工具）。来源：数字 = 电脑摄像头（需 `pip install opencv-python`，macOS 要给终端摄像头权限；iPhone 连续互通相机也会作为一个序号出现），`http://…` = 返回 JPEG 的快照地址（留给车载 XIAO ESP32S3 Sense），其他 = 图片文件。上传前缩到 640 宽。`camera-test --camera 0` 只拍照存文件，不连平台。工具描述和提示词里写了瞄准流程：拍照问偏左/偏右多少度 → turn → 再拍确认；**拍照不等于可以开火**。✅ 单元测试（本地假视觉接口校验 multipart 字段、请求头、MCP 调用链路，共 28 passed）。❓ **未在真实平台和真摄像头上验证**：下一步执行 `camera-test --camera 0` 看照片，再 `run --backend udp --camera 0` 说「看看前面有什么」
 - **M1 灵矽激活**：已执行 `python -m linx_client activate`，OTA 上报成功，**设备已在智控台绑定（✅ 2026-10-23）**。虚拟设备 `Device-Id: 9A:BD:6D:4D:8A:A0`，身份文件是 `linx-client/.linx_device.json`（已 gitignore，不要删）。智控台已配置 Function Call 和提示词；`run --backend mock` 已验证文本链路。待验证：麦克风语音输入、扬声器播放 TTS。
 
 ## 下一步（按优先级）
@@ -47,7 +48,7 @@
 
 ## 已确认事实
 
-- **灵矽支持视觉（2026-10-25 实测）**：智控台「对话与视觉 → 视觉分析」开启并选好视觉模型后，平台在 MCP `initialize` 的 `params.capabilities.vision` 里下发 `{url, token}`（url = `http://xrobo-io.qiniuapi.com/mcp/vision/explain2`；平台自称 `XiaozhiClient`，协议同小智）。**OTA 响应里没有视觉字段**，之前据此认为不支持，判断错了。调用方式同小智 `Esp32Camera::Explain`：POST multipart，字段 `question` + `file`（`camera.jpg`，image/jpeg），请求头 `Authorization: Bearer <token>`、`Device-Id`、`Client-Id`。返回 `{"action":"RESPONSE","response":"<分析文字>","success":true}`，实测 0.8s。我们的 `mcp.py` 目前会忽略 initialize 的参数，需要改为保存下来
+- **灵矽支持视觉（2026-10-25 实测）**：智控台「对话与视觉 → 视觉分析」开启并选好视觉模型后，平台在 MCP `initialize` 的 `params.capabilities.vision` 里下发 `{url, token}`（url = `http://xrobo-io.qiniuapi.com/mcp/vision/explain2`；平台自称 `XiaozhiClient`，协议同小智）。**OTA 响应里没有视觉字段**，之前据此认为不支持，判断错了。调用方式同小智 `Esp32Camera::Explain`：POST multipart，字段 `question` + `file`（`camera.jpg`，image/jpeg），请求头 `Authorization: Bearer <token>`、`Device-Id`、`Client-Id`。返回 `{"action":"RESPONSE","response":"<分析文字>","success":true}`，实测 0.8s。`mcp.py` 现在会保存 initialize 的 capabilities（`McpServer.vision`），拍照工具已实现（见「进行中」）
 
 - **遥控器 USB 探测（2026-10-24 实测，遥控器接 Mac）**：
   - USB 为 ESP32-C3 原生 `USB JTAG_serial debug unit`，VID `0x303A` / PID `0x1001`，没有 CH340/CP210x（回答了 v3 W0 的芯片疑问；Core 都是同款板，车上的大概率也一样）

@@ -3,3 +3,5 @@ sounddevice>=0.4
 pyserial>=3.5
 # 仅当服务端下发 opus 音频时需要（另需系统安装 libopus）：
 # opuslib>=3.0
+# 仅当 run --camera 用电脑摄像头时需要：
+# opencv-python>=4.8
