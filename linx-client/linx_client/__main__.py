@@ -192,8 +192,12 @@ async def _run(args):
     if args.camera:
         from .camera import PhotoTool, make_camera
 
+        from .seek import Seeker
+
         photo = PhotoTool(make_camera(args.camera), mcp, ident)
-        register_camera_tools(mcp, photo, view=args.camera_view)
+        # say 要用到后面才创建的 session，所以包一层，调用时再取
+        seeker = Seeker(tank, photo.ask, say=lambda text: session.say(text), view=args.camera_view)
+        register_camera_tools(mcp, photo, view=args.camera_view, seeker=seeker)
         print(f"📷 摄像头：{args.camera}（需在智控台开启视觉分析）")
     session = LinxSession(
         ident,

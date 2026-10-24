@@ -50,6 +50,8 @@ class TankExecutor:
         self._wakeup = asyncio.Event()
         self._current: asyncio.Task | None = None
         self._current_desc: str | None = None
+        self._mission: asyncio.Task | None = None  # 闭环任务（如看图寻的），同一时间只有一个
+        self._mission_desc: str | None = None
         self._worker: asyncio.Task | None = None
         self._last_fire = 0.0
         self.persona = "normal"
@@ -94,7 +96,24 @@ class TankExecutor:
         self._wakeup.set()
         return f"已安排：{action.desc}"
 
+    def start_mission(self, desc: str, run: Callable[[], Awaitable[None]]) -> str:
+        """启动一个会自己反复下发动作的闭环任务。它内部仍然只通过 move/turn/fire 等方法动车，
+        所以安全约束照常生效；stop() 会连任务一起取消。"""
+        if self._mission and not self._mission.done():
+            raise ValueError(f"正在执行「{self._mission_desc}」，先说“停”再换新任务")
+        self._mission_desc = desc
+        self._mission = asyncio.create_task(run())
+        self._mission.add_done_callback(lambda t: t.cancelled() or t.exception())  # 吞掉未取出的异常警告
+        return f"开始：{desc}"
+
+    async def wait_idle(self):
+        """等队列里的动作全部做完（闭环任务每一步动完再拍下一张）。"""
+        while self._current or self._queue:
+            await asyncio.sleep(0.05)
+
     async def stop(self) -> str:
+        if self._mission and not self._mission.done():
+            self._mission.cancel()
         self._queue.clear()
         if self._current and not self._current.done():
             self._current.cancel()
@@ -162,7 +181,7 @@ class TankExecutor:
 
     def emote(self, kind: str) -> str | None:
         """情绪小动作。车正忙（有动作在做或在排队）时跳过，不打扰正事；动作都成对抵消，车和炮管回到原位。"""
-        if kind not in EMOTES or self._current or self._queue:
+        if kind not in EMOTES or self._current or self._queue or (self._mission and not self._mission.done()):
             return None
         s = self._speed(100)
         moves = {
@@ -194,6 +213,7 @@ class TankExecutor:
     def status(self) -> dict:
         return {
             "current": self._current_desc,
+            "mission": self._mission_desc if self._mission and not self._mission.done() else None,
             "queued": [a.desc for a in self._queue],
             "max_speed": self.max_speed,
             "fire_enabled": self.fire_enabled,

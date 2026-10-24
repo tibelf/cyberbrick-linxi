@@ -59,6 +59,7 @@ python -m linx_client list-audio
    - `tools.py`：工具名、描述、参数 schema。**描述文字直接决定大模型何时调用**（如 fire 只在用户明确要求时调用）。
    - `tank/executor.py`：动作队列。工具调用**立即返回「已安排」**，动作在后台 worker 中顺序执行，因此多次调用会自然串成序列。`stop()` 不进队列：清空队列、取消当前动作、halt。
    - `camera.py`：拍照工具。取图来源 `--camera`（数字=电脑摄像头 OpenCV，http=JPEG 快照地址如车载 ESP32S3，其他=文件）；视觉接口 url/token 来自 MCP initialize 的 `capabilities.vision`（`McpServer.vision`），字段 `question` + `file`（camera.jpg）
+   - `seek.py`：看图闭环寻的 `self.tank.seek`（有 `--camera` 才注册）。平台一轮只执行一次工具调用，所以“拍照→换算→转向/前进→再拍”的循环在本地跑：`TankExecutor.start_mission` 启动，`stop()` 会连任务一起取消，每一步仍走 move/turn/fire 的安全约束；任务期间不插情绪小动作；结束后 `session.say()` 播报。视觉模型被要求按固定格式回答（俯视 `找到=…；方向=钟点；距离=车身长`，前视 `找到=…；偏角=…；近=…`），解析不了就重问一次再放弃
    - `tank/backend.py` 定义 `TankBackend` Protocol + `MockBackend`；`serial_repl.py` 是实车驱动。
 3. **CyberBrick Core（执行和保底）**：`serial_repl.py` 连接时进入 raw REPL，一次性注入 `BOOTSTRAP`（定义 `drive/aim/fire/halt` + `machine.Timer` 看门狗），之后每条指令只发一行函数调用，设备端不 sleep。
 
