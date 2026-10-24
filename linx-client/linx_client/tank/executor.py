@@ -10,9 +10,11 @@ from .backend import TankBackend
 MAX_ACTION_MS = 5000
 MAX_QUEUE_MS = 15000
 FAILSAFE_SLACK_MS = 300
-MAX_TURRET_MS = 3000
 MS_PER_90_AT_FULL = 400  # 满速原地转 90° 需要的毫秒数（2026-10-24 实车落地实测：400ms ≈ 90°）
-TURRET_SPEED = 45  # 与原厂遥控（右肩摇杆 ±45）一致
+MAX_BARREL_MS = 1500  # 俯仰有机械限位，转太久会顶住舵机
+# 炮管俯仰是 SERVO1 上的连续旋转舵机（原厂右肩摇杆上下控制），速度 45 与原厂一致；
+# 正负号决定哪边是“抬高”，2026-10-24 实车发现装反过一次，以实测为准
+BARREL_UP_SPEED = 45
 
 
 @dataclass
@@ -103,20 +105,21 @@ class TankExecutor:
         name = "前进" if sign > 0 else "后退"
         return self._enqueue(Action(f"{name} {ms}ms 速度{abs(s)}", ms, lambda: self._drive_for(s, s, ms)))
 
-    def turn(self, direction: str, angle: int, speed: int) -> str:
+    def turn(self, direction: str, angle: int, speed: int = 100) -> str:
         s = self._speed(speed)
-        # 原地转向的角速度近似与速度成正比（只在满速下校准过，低速时角度可能偏小）
+        # 只在满速下校准过：低速时履带打滑严重，80% 速度实测转速不到一半，所以语音转向固定满速。
+        # 只有 --max-speed 限速时才会低于满速，那时按比例换算只是近似
         ms = min(int(int(angle) / 90 * MS_PER_90_AT_FULL * 100 / max(s, 1)), MAX_ACTION_MS)
         # 原地转向：两条履带反向，比单侧履带转快一倍、几乎不画弧
         left, right = (-s, s) if direction == "left" else (s, -s)
         name = "左转" if direction == "left" else "右转"
         return self._enqueue(Action(f"{name} {int(angle)}° {ms}ms", ms, lambda: self._drive_for(left, right, ms)))
 
-    def turret(self, direction: str, duration_ms: int) -> str:
-        sp = TURRET_SPEED if direction == "left" else -TURRET_SPEED
-        ms = min(int(duration_ms), MAX_TURRET_MS)
-        name = "炮塔左转" if direction == "left" else "炮塔右转"
-        return self._enqueue(Action(f"{name} {ms}ms", ms, lambda: self._turret_for(sp, ms)))
+    def barrel(self, direction: str, duration_ms: int) -> str:
+        sp = BARREL_UP_SPEED if direction == "up" else -BARREL_UP_SPEED
+        ms = min(int(duration_ms), MAX_BARREL_MS)
+        name = "炮管抬高" if direction == "up" else "炮管压低"
+        return self._enqueue(Action(f"{name} {ms}ms", ms, lambda: self._barrel_for(sp, ms)))
 
     def fire(self, shots: int = 1) -> str:
         if not self.fire_enabled:
@@ -131,8 +134,8 @@ class TankExecutor:
             for _ in range(2):
                 await self._drive_for(-s, s, 400)
                 await self._drive_for(s, -s, 400)
-            await self._turret_for(TURRET_SPEED, 400)
-            await self._turret_for(-TURRET_SPEED, 400)
+            await self._barrel_for(BARREL_UP_SPEED, 300)
+            await self._barrel_for(-BARREL_UP_SPEED, 300)
 
         return self._enqueue(Action("跳舞", 2400, run))
 
@@ -153,7 +156,7 @@ class TankExecutor:
         finally:
             await self._safe_halt()
 
-    async def _turret_for(self, speed: int, ms: int):
+    async def _barrel_for(self, speed: int, ms: int):
         try:
             await self.backend.turret(speed, ms + FAILSAFE_SLACK_MS)
             await asyncio.sleep(ms / 1000)

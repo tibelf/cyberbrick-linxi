@@ -32,10 +32,10 @@ class WebConsole:
         self.actions = {
             "forward": lambda: tank.move("forward", 1000, 80),
             "backward": lambda: tank.move("backward", 1000, 80),
-            "left": lambda: tank.turn("left", 90, 80),
-            "right": lambda: tank.turn("right", 90, 80),
-            "turret_left": lambda: tank.turret("left", 500),
-            "turret_right": lambda: tank.turret("right", 500),
+            "left": lambda: tank.turn("left", 90),
+            "right": lambda: tank.turn("right", 90),
+            "barrel_up": lambda: tank.barrel("up", 300),
+            "barrel_down": lambda: tank.barrel("down", 300),
             "fire": lambda: tank.fire(1),
             "dance": tank.dance,
         }

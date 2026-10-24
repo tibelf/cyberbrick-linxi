@@ -222,8 +222,8 @@ async def _tank_test(args):
         ("后退 1 秒", lambda: tank.move("backward", 1000, args.max_speed)),
         ("左转 90°", lambda: tank.turn("left", 90, args.max_speed)),
         ("右转 90°", lambda: tank.turn("right", 90, args.max_speed)),
-        ("炮塔左转 500ms", lambda: tank.turret("left", 500)),
-        ("炮塔右转 500ms", lambda: tank.turret("right", 500)),
+        ("炮管抬高 300ms", lambda: tank.barrel("up", 300)),
+        ("炮管压低 300ms", lambda: tank.barrel("down", 300)),
     ]
     if not args.no_fire:
         steps.append(("发射 1 发（确认前方安全！）", lambda: tank.fire(1)))
