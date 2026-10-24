@@ -3,8 +3,10 @@
 协议见 Xrobot-docs/docs/xrobot/platform/websocket.md。
 """
 
+import array
 import asyncio
 import json
+import math
 from typing import Callable
 
 from websockets.asyncio.client import ClientConnection, connect
@@ -15,6 +17,12 @@ from .identity import Identity
 from .mcp import McpServer
 
 Endpoint = tuple[str, str]  # (ws_url, token)
+BARGE_IN_FRAMES = 6  # 连续 6 帧（120ms）够响才算插话，避免咳嗽、碰桌子误触发
+
+
+def _rms(frame: bytes) -> float:
+    samples = array.array("h", frame)
+    return math.sqrt(sum(s * s for s in samples) / len(samples)) if samples else 0.0
 
 
 class LinxSession:
@@ -29,6 +37,7 @@ class LinxSession:
         mic_device=None,
         speaker_device=None,
         on_event: Callable[[dict], None] | None = None,
+        barge_in_level: int = 2000,
     ):
         self.ident = ident
         self.mcp = mcp
@@ -40,6 +49,9 @@ class LinxSession:
         self.speaker_device = speaker_device
         self.on_event = on_event  # 网页控制台等订阅者：收到 {"type": ...} 事件
         self.mic_enabled = True  # 网页「按住说话」用：关闭时不上传麦克风
+        self.barge_in_level = barge_in_level  # 全双工下说话打断的音量阈值（int16 RMS），0 = 关闭
+        self._drop_tts = False  # 打断后丢弃本轮回复残余的音频，直到下一轮开始
+        self._loud_frames = 0
         self.session_id: str | None = None
         self.speaking = False
         self.ws: ClientConnection | None = None
@@ -69,6 +81,20 @@ class LinxSession:
     async def send_text(self, text: str):
         """调试用：不说话直接发文本（借用 listen.detect 消息，服务端会把它当作用户输入的唤醒/问题）。"""
         await self._send_json({"session_id": self.session_id, "type": "listen", "state": "detect", "text": text})
+
+    async def abort(self) -> bool:
+        """打断小车说话：通知平台中止本轮回复，本地立即静音。小车没在说话时什么也不做。"""
+        if not self.speaking and not (self._speaker and self._speaker.busy()):
+            return False
+        self._drop_tts = True
+        if self._speaker:
+            self._speaker.flush()
+        self.speaking = False
+        self._emit(type="speaking", on=False)
+        print("✋ 打断")
+        # 协议同小智：abort 让服务端停止当前 TTS；reason 取协议文档里唯一列出的值
+        await self._send_json({"session_id": self.session_id, "type": "abort", "reason": "wake_word_detected"})
+        return True
 
     def _emit(self, **event):
         if self.on_event:
@@ -123,6 +149,7 @@ class LinxSession:
                     t.cancel()
                 self._stop_audio()
                 self.ws = None
+                self.speaking = self._drop_tts = False  # 断线时回复也就结束了，否则半双工下麦克风会一直被挡住
                 self._emit(type="conn", state="disconnected")
 
     async def _wait_hello(self, ws) -> dict:
@@ -170,14 +197,21 @@ class LinxSession:
                 continue
             if not self.mic_enabled:
                 frame = bytes(len(frame))  # 发静音而不是停发，平台的语音检测才能判断一句话说完了
-            if not self.duplex and (self.speaking or self._speaker.busy()):
+            talking = self.speaking or self._speaker.busy()
+            if not self.duplex and talking:
                 continue  # 半双工：播报时不上传，避免小车把自己的声音当成指令
+            if talking and self.barge_in_level:
+                # 全双工（需戴耳机）：小车说话时检测到人声就打断
+                self._loud_frames = self._loud_frames + 1 if _rms(frame) > self.barge_in_level else 0
+                if self._loud_frames >= BARGE_IN_FRAMES:
+                    self._loud_frames = 0
+                    await self.abort()
             await self.ws.send(frame)
 
     async def _recv_loop(self, ws):
         async for raw in ws:
             if isinstance(raw, bytes):
-                if self._speaker:
+                if self._speaker and not self._drop_tts:
                     self._speaker.feed(raw)
                 continue
             try:
@@ -201,12 +235,14 @@ class LinxSession:
         elif t == "tts":
             state = msg.get("state")
             if state == "start":
+                self._drop_tts = False
                 self.speaking = True
                 self._emit(type="speaking", on=True)
             elif state == "sentence_start":
                 print(f"🤖 小车：{msg.get('text')}")
                 self._emit(type="bot", text=msg.get("text"))
             elif state == "stop":
+                self._drop_tts = False
                 self.speaking = False
                 self._emit(type="speaking", on=False)
                 if msg.get("is_aborted") and self._speaker:

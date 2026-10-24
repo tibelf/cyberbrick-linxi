@@ -41,6 +41,7 @@
   .pill.disconnected { color: var(--bad); }
   .pill.speaking { color: var(--accent); }
   .pill[hidden] { display: none; }
+  button.pill { border: 0; cursor: pointer; font: inherit; font-size: 13px; }
   .spacer { flex: 1; }
   .hint { color: var(--muted); font-size: 13px; }
 
@@ -116,9 +117,9 @@
 <header>
   <h1>语音坦克控制台</h1>
   <span id="conn" class="pill connecting">连接中</span>
-  <span id="speaking" class="pill speaking" hidden>小车说话中</span>
+  <button id="speaking" class="pill speaking" hidden title="打断小车说话">小车说话中 · 点击打断</button>
   <span class="spacer"></span>
-  <span class="hint">Esc 急停 · 按住空格说话</span>
+  <span class="hint">Esc 急停 · 按住空格说话（会打断小车）</span>
 </header>
 
 <main>
@@ -291,7 +292,15 @@ document.querySelectorAll("[data-action]").forEach((b) => {
 // 麦克风：常开模式点击切换静音；按住说话模式按下开、松开关
 document.querySelectorAll("#mode button").forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
 const mic = $("mic");
-const talk = (on) => { if (mode === "ptt" && micOn !== on) { send({ type: "mic", on }); setMic(on); } };
+// 按下说话时先打断小车（它没在说话时服务端什么也不做）
+const talk = (on) => {
+  if (mode === "ptt" && micOn !== on) {
+    if (on) send({ type: "abort" });
+    send({ type: "mic", on });
+    setMic(on);
+  }
+};
+$("speaking").onclick = () => send({ type: "abort" });
 mic.onclick = () => { if (mode === "open") send({ type: "mic", on: !micOn }); };
 mic.addEventListener("pointerdown", () => talk(true));
 ["pointerup", "pointerleave", "pointercancel"].forEach((t) => mic.addEventListener(t, () => talk(false)));

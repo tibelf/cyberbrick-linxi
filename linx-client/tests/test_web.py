@@ -19,6 +19,9 @@ class FakeSession:
     async def send_text(self, text):
         self.sent.append(text)
 
+    async def abort(self):
+        self.sent.append("<abort>")
+
 
 def _free_port() -> int:
     with socket.socket() as s:
@@ -64,6 +67,7 @@ def test_web_console():
             await ws.send(json.dumps({"type": "mic", "on": False}))
             assert (await _recv_type(ws, "mic"))["on"] is False
             assert session.mic_enabled is False and session.sent == ["开火"]
+            await ws.send(json.dumps({"type": "abort"}))
 
             await ws.send(json.dumps({"type": "stop"}))
             await _recv_type(ws, "info")

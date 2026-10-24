@@ -152,15 +152,18 @@ def cmd_activate(args):
 
 
 def _start_console(loop: asyncio.AbstractEventLoop, tank: TankExecutor, session: LinxSession, done: asyncio.Event):
-    """键盘：回车/s = 急停；t <文字> = 发文本调试；q = 退出。"""
+    """键盘：回车/s = 急停（同时打断说话）；a = 打断说话；t <文字> = 发文本调试；q = 退出。"""
 
     def worker():
-        print("⌨️  回车或 s=急停 · t 文字=发文本 · q=退出")
+        print("⌨️  回车或 s=急停 · a=打断说话 · t 文字=发文本 · q=退出")
         for line in sys.stdin:
             line = line.strip()
             if line in ("", "s", "stop", "停"):
                 asyncio.run_coroutine_threadsafe(tank.stop(), loop)
+                asyncio.run_coroutine_threadsafe(session.abort(), loop)
                 print("🛑 急停")
+            elif line == "a":
+                asyncio.run_coroutine_threadsafe(session.abort(), loop)
             elif line.startswith("t "):
                 asyncio.run_coroutine_threadsafe(session.send_text(line[2:].strip()), loop)
             elif line == "q":
@@ -194,6 +197,7 @@ async def _run(args):
         duplex=args.duplex,
         mic_device=args.mic,
         speaker_device=args.speaker,
+        barge_in_level=args.barge_in_level,
     )
     if args.web:
         import webbrowser
@@ -249,7 +253,9 @@ def main():
     _add_tank_args(p_run)
     p_run.add_argument("--no-audio", action="store_true", help="不开麦克风/扬声器（只联调工具调用）")
     p_run.add_argument("--mode", default="realtime", choices=["realtime", "auto", "manual"])
-    p_run.add_argument("--duplex", action="store_true", help="全双工（需要耳机或回声消除，否则会自我打断）")
+    p_run.add_argument("--duplex", action="store_true", help="全双工：小车说话时也能说话打断它（必须戴耳机，否则会自我打断）")
+    p_run.add_argument("--barge-in-level", type=int, default=2000,
+                       help="全双工下判定为插话的音量阈值（16 位采样 RMS，越小越灵敏，0 = 只上传不自动打断）")
     p_run.add_argument("--mic", help="麦克风设备名或序号（见 list-audio）")
     p_run.add_argument("--speaker", help="扬声器设备名或序号")
     p_run.add_argument("--ws-url", help="覆盖 WebSocket 地址")
