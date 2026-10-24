@@ -46,29 +46,62 @@ def _ask_wifi_config(default_ssid: str) -> dict:
     return {"networks": networks, "admin_password": admin}
 
 
-def cmd_wifi_setup(args):
-    """把 Wi-Fi 控车程序写到车上。默认走 USB；--host 走 Wi-Fi（WebREPL）。密码只写到车上，不进仓库。"""
+def _open_car(args):
+    """连上车：--host 走 Wi-Fi 维护通道，否则走 USB raw REPL。返回 (repl, reset)，reset 会重启车并关闭连接。"""
     import getpass
+
+    if args.host:
+        from .tank.netadmin import NetRepl
+
+        repl = NetRepl(args.host, getpass.getpass("维护密码："))
+
+        def reset():
+            repl.reset()
+            repl.close()
+
+        return repl, reset
+
+    import serial
+
+    from .tank.serial_repl import RawRepl, find_port
+
+    name = args.port or find_port()
+    if not name:
+        raise SystemExit("找不到车的串口：请用 USB 连上车，或者装车后用 --host <车的IP> 走无线")
+    port = serial.Serial(name, 115200, timeout=0.1)
+    repl = RawRepl(port, timeout=10)
+    repl.enter()
+
+    def reset():
+        repl.exit()
+        port.write(b"import machine; machine.reset()\r\n")
+        time.sleep(0.3)
+        port.close()
+
+    return repl, reset
+
+
+def cmd_car_exec(args):
+    """在车上执行一段 MicroPython 代码并打印输出（调试用）。不重启车，执行完车保持停止状态。"""
+    repl, reset = _open_car(args)
+    code = args.code if args.code != "-" else sys.stdin.read()
+    try:
+        print(repl.exec(code))
+    finally:
+        if args.reset:
+            reset()
+
+
+def cmd_wifi_setup(args):
+    """把 Wi-Fi 控车程序写到车上。默认走 USB；--host 走 Wi-Fi 维护通道。密码只写到车上，不进仓库。"""
     import json
     from pathlib import Path
 
-    from .tank.serial_repl import RawRepl, find_port, put_file, remove_file
+    from .tank.serial_repl import put_file, remove_file
 
     fw = Path(__file__).resolve().parents[2] / "firmware"
-    if args.host:
-        from .tank.webrepl import WebReplPort
-
-        port = WebReplPort(args.host, getpass.getpass("维护密码："))
-    else:
-        import serial
-
-        name = args.port or find_port()
-        if not name:
-            raise SystemExit("找不到车的串口：请用 USB 连上车，或者装车后用 --host <车的IP> 走无线")
-        port = serial.Serial(name, 115200, timeout=0.1)
+    repl, reset = _open_car(args)
     try:
-        repl = RawRepl(port, timeout=10)
-        repl.enter()
         if args.uninstall:
             put_file(repl, "/boot.py", (fw / "backup-car" / "boot.py").read_bytes())
             remove_file(repl, "/wifi.json")
@@ -82,11 +115,8 @@ def cmd_wifi_setup(args):
             put_file(repl, "/boot.py", (fw / "car" / "boot.py").read_bytes())
             print("✅ 已写入，车正在重启。灯：黄=连接中，蓝=已连上 Wi-Fi，紫=没连上、自己开了热点 CyberBrick-Tank")
             print("   开机时按住板载按键 = 原厂遥控")
-        repl.exit()
-        port.write(b"import machine; machine.reset()\r\n")  # 重启后按新的 boot.py 选择模式
-        time.sleep(0.3)
     finally:
-        port.close()
+        reset()  # 重启后按新的 boot.py 选择模式（boot.py 最后写，中途失败也不会半新半旧）
 
 
 def cmd_activate(args):
@@ -201,10 +231,16 @@ def main():
 
     p_wifi = sub.add_parser("wifi-setup", help="给车装 Wi-Fi 控车程序（默认 USB，--host 走无线；--uninstall 恢复原厂）")
     p_wifi.add_argument("--port", help="车的串口")
-    p_wifi.add_argument("--host", help="车的 IP，走 Wi-Fi（WebREPL）而不是 USB；热点模式下是 192.168.4.1")
+    p_wifi.add_argument("--host", help="车的 IP，走 Wi-Fi 维护通道而不是 USB；热点模式下是 192.168.4.1")
     p_wifi.add_argument("--code-only", action="store_true", help="只更新车上的程序，不改 Wi-Fi 配置")
     p_wifi.add_argument("--ssid", default="CMCC-7GE2", help="2.4G Wi-Fi 名称")
     p_wifi.add_argument("--uninstall", action="store_true", help="恢复原厂 boot.py，删除 Wi-Fi 配置")
+
+    p_exec = sub.add_parser("car-exec", help="在车上执行一段代码并打印输出（调试用）")
+    p_exec.add_argument("code", help="MicroPython 代码，- 表示从标准输入读")
+    p_exec.add_argument("--port", help="车的串口")
+    p_exec.add_argument("--host", help="车的 IP，走 Wi-Fi 维护通道")
+    p_exec.add_argument("--reset", action="store_true", help="执行完重启车（Wi-Fi 模式下维护会话结束后车本来就会继续接收指令）")
 
     args = ap.parse_args()
     if args.cmd == "activate":
@@ -217,6 +253,8 @@ def main():
         asyncio.run(_run(args))
     elif args.cmd == "tank-test":
         asyncio.run(_tank_test(args))
+    elif args.cmd == "car-exec":
+        cmd_car_exec(args)
     elif args.cmd == "wifi-setup":
         cmd_wifi_setup(args)
     elif args.cmd == "list-audio":

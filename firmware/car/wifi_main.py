@@ -2,7 +2,9 @@
 """Wi-Fi 控车模式（运行在车上的 MicroPython）。
 
 依次尝试 /wifi.json 里的 2.4G 网络；都连不上就自己开热点 CyberBrick-Tank（IP 192.168.4.1）。
-监听 UDP 4210，只执行白名单指令，不执行任意代码；同时开 WebREPL（端口 8266，带密码）供无线维护。
+监听 UDP 4210，只执行白名单指令，不执行任意代码。
+另开 TCP 8266 维护通道（本固件没有 WebREPL）：先发维护密码一行，之后每次发
+"<字节数>\n<代码>"，车执行后回 "ok|err <字节数>\n<输出>"。会话期间车先停下。
 /wifi.json 格式：{"networks": [{"ssid": ..., "password": ...}, ...], "admin_password": "8-9 位"}
 协议：每个 UDP 包一条 ASCII 指令，回一条应答。
   ping                  -> pong
@@ -15,9 +17,11 @@
 主机掉线或 Wi-Fi 断开时，车会在最后一条指令的 ms 到期后自己停下。
 """
 
+import io
 import sys
 import time
 import json
+import select
 import socket
 import network
 from machine import Timer, Pin
@@ -28,6 +32,7 @@ from motors import MotorsController
 from servos import ServosController
 
 PORT = 4210
+ADMIN_PORT = 8266
 AP_SSID = 'CyberBrick-Tank'
 MAX_MS = 6000
 TRIG_REST = 86
@@ -114,18 +119,52 @@ def _connect(cfg):
     return AP_SSID + '（热点）', ap.ifconfig()[0]
 
 
+def _readn(conn, n):
+    buf = b''
+    while len(buf) < n:
+        chunk = conn.read(n - len(buf))
+        if not chunk:
+            raise OSError('连接中断')
+        buf += chunk
+    return buf
+
+
+def _admin_session(conn, password):
+    """维护会话：密码正确后循环执行主机发来的代码，print 的内容作为输出回传。"""
+    halt()
+    conn.settimeout(60)
+    if conn.readline().strip().decode() != password:
+        conn.write(b'err 0\n')
+        return
+    conn.write(b'ok 0\n')
+    out = []
+    g = {'print': lambda *a: out.append(' '.join(str(x) for x in a))}
+    while True:
+        hdr = conn.readline()
+        if not hdr:
+            return
+        code = _readn(conn, int(hdr)).decode()
+        out.clear()
+        status = 'ok'
+        try:
+            exec(code, g)
+        except Exception as e:
+            s = io.StringIO()
+            sys.print_exception(e, s)
+            out.append(s.getvalue())
+            status = 'err'
+        body = '\n'.join(out).encode()
+        conn.write(('%s %d\n' % (status, len(body))).encode())
+        conn.write(body)
+
+
 def main():
     halt()
     _led(20, 10, 0)  # 黄：正在连 Wi-Fi
     with open('/wifi.json') as f:
         cfg = json.load(f)
     name, ip = _connect(cfg)
-    try:
-        import webrepl
-        webrepl.start(password=cfg['admin_password'])
-    except Exception as e:
-        print('[wifi] WebREPL 启动失败', e)
-    print('[wifi] 已连接', name, 'IP', ip, 'UDP', PORT)
+    print('[wifi] 已连接', name, 'IP', ip, 'UDP', PORT, '维护', ADMIN_PORT)
     if name.startswith(AP_SSID):
         _led(20, 0, 20)  # 紫：自己开了热点
     else:
@@ -133,11 +172,28 @@ def main():
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(('0.0.0.0', PORT))
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(('0.0.0.0', ADMIN_PORT))
+    srv.listen(1)
+    poller = select.poll()
+    poller.register(sock, select.POLLIN)
+    poller.register(srv, select.POLLIN)
     while True:
-        data, addr = sock.recvfrom(128)
-        try:
-            reply = handle(data.decode())
-        except Exception as e:  # 指令出错也不能让主循环退出
-            halt()
-            reply = 'err ' + str(e)
-        sock.sendto(reply.encode(), addr)
+        for obj, *_ in poller.poll():
+            if obj is srv:
+                conn, _ = srv.accept()
+                try:
+                    _admin_session(conn, cfg['admin_password'])
+                except Exception as e:  # 维护会话出错不影响控车
+                    print('[wifi] 维护会话结束', e)
+                finally:
+                    conn.close()
+                continue
+            data, addr = sock.recvfrom(128)
+            try:
+                reply = handle(data.decode())
+            except Exception as e:  # 指令出错也不能让主循环退出
+                halt()
+                reply = 'err ' + str(e)
+            sock.sendto(reply.encode(), addr)
