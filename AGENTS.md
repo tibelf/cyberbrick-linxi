@@ -19,7 +19,9 @@
 
 七牛 Hackathon「智能硬件」课题：一辆能发射子弹的 CyberBrick 小车（Mini T 类履带车，主控 Core = ESP32-C3 / MicroPython），接入灵矽（Linx）平台实现语音控制。没有灵矽实体硬件，由 `linx-client/` 在电脑上**模拟一台灵矽设备**（电脑麦克风/扬声器），再通过 USB 串口控车。
 
-- 设计文档（中文，含里程碑、风险、待确认项）：`docs/技术方案.md`。改架构或协议时同步更新它。
+- **主线（v3）**：Android Chrome 网页本身就是灵矽设备，通过 WebUSB（有线）或 Web Bluetooth（无线）控车，见 `docs/技术方案-v3-网页版.md`。`linx-client/` 是 Python 参考实现：网页的协议、工具描述和安全约束必须与它一致，改动其中一边时同步另一边。
+- 设计文档（中文，含里程碑、风险、待确认项）：`docs/技术方案-v3-网页版.md`（主线）、`docs/技术方案.md`（v2，协议细节）。改架构或协议时同步更新。
+- **Device-Id 就是灵矽的唯一凭据**（平台不校验 token），绝不能写进仓库（仓库是公开的）。
 - 文档、注释、终端输出、MCP 工具描述均使用中文，保持一致。
 
 ## Commands
@@ -58,7 +60,7 @@ python -m linx_client list-audio
 
 - **时长由主机控制，backend 只设状态**：`drive(left, right, failsafe_ms)` / `fire(pulse_ms)` 只设置输出并启动设备端看门狗；executor 负责 sleep 后 halt。`failsafe_ms = 时长 + 300ms`，主机崩溃或拔 USB 后设备会自己停。新增 backend（如计划中的 Wi-Fi UDP）必须保留这套语义。
 - 安全约束集中在 executor：单动作 ≤ 5s、队列总时长 ≤ 15s（超出就抛错拒绝）、速度裁剪到 `--max-speed`、发射每次 ≤ 3 发且间隔 1.5s 冷却、`--no-fire` 锁定。不要绕过 executor 直接调用 backend。
-- 引脚映射（左履带 Pin2、右履带 Pin4/5、炮塔 Pin3 @50Hz、发射 Pin6/7）为初步推测，**尚未在本车验证**；方向问题改 `BOOTSTRAP`。raw REPL 会打断原厂程序，退出后按 Core 复位键才能恢复实体遥控。
+- 接线以车上 `rc_config` 为准（见 `docs/HANDOFF.md`「已确认事实」）：履带 MOTOR1 Pin4/5、MOTOR2 Pin6/7（反装），炮塔 SERVO1 Pin3（连续旋转舵机），发射扳机 SERVO2 Pin2（86° 松开 / 150° 扣下）；`BOOTSTRAP` 调用车上原厂驱动 `/bbl/motors.py`、`/bbl/servos.py`。左右和方向待架空实测。raw REPL 会打断原厂程序，退出后按 Core 复位键才能恢复实体遥控。
 
 ## Tests
 

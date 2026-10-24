@@ -13,11 +13,11 @@ class TankBackend(Protocol):
     async def drive(self, left: int, right: int, failsafe_ms: int) -> None:
         """left/right: -100..100，正数前进。"""
 
-    async def aim(self, angle: int) -> None:
-        """炮塔俯仰 0..180，90 为水平。"""
+    async def turret(self, speed: int, failsafe_ms: int) -> None:
+        """炮塔以 speed（-100..100，0 为停）持续转动。"""
 
     async def fire(self, pulse_ms: int) -> None:
-        """发射电机通电 pulse_ms 毫秒（一发）。"""
+        """扣下扳机（一发），failsafe 到点自动回位。"""
 
     async def halt(self) -> None:
         """立刻关闭所有输出。"""
@@ -43,8 +43,8 @@ class MockBackend:
     async def drive(self, left, right, failsafe_ms):
         self._log("drive", left, right, failsafe_ms)
 
-    async def aim(self, angle):
-        self._log("aim", angle)
+    async def turret(self, speed, failsafe_ms):
+        self._log("turret", speed, failsafe_ms)
 
     async def fire(self, pulse_ms):
         self._log("fire", pulse_ms)

@@ -2,8 +2,10 @@
 
 import argparse
 import asyncio
+import os
 import sys
 import threading
+import time
 
 from . import ota
 from .identity import load_or_create
@@ -14,14 +16,128 @@ from .tools import register_tank_tools
 
 
 def _add_tank_args(p: argparse.ArgumentParser):
-    p.add_argument("--backend", choices=["mock", "serial"], default="mock", help="mock=不接硬件只打印")
+    p.add_argument("--backend", choices=["mock", "serial", "udp"], default="mock",
+                   help="mock=不接硬件只打印，serial=USB 线控，udp=Wi-Fi 控车（先执行 wifi-setup）")
     p.add_argument("--port", help="CyberBrick 串口，如 /dev/tty.usbmodem1101 或 COM3")
+    p.add_argument("--host", help="Wi-Fi 模式下车的 IP，不填则局域网广播自动查找")
     p.add_argument("--max-speed", type=int, default=40, help="速度上限 0-100（首测建议 40）")
     p.add_argument("--no-fire", action="store_true", help="锁定发射功能")
 
 
 def _make_tank(args) -> TankExecutor:
-    return TankExecutor(make_backend(args.backend, args.port), max_speed=args.max_speed, fire_enabled=not args.no_fire)
+    return TankExecutor(make_backend(args.backend, args.port, args.host), max_speed=args.max_speed, fire_enabled=not args.no_fire)
+
+
+def _ask_wifi_config(default_ssid: str) -> dict:
+    import getpass
+
+    networks = []
+    print("依次输入车要连的 2.4G Wi-Fi（可以多个，比如家里 + 手机热点），名称留空结束")
+    while True:
+        default = "" if networks else default_ssid
+        ssid = input(f"Wi-Fi 名称 [{default}]：").strip() or default
+        if not ssid:
+            break
+        networks.append({"ssid": ssid, "password": getpass.getpass(f"{ssid} 的密码（不回显）：")})
+    while True:
+        admin = getpass.getpass("维护密码（8-9 位，用于车的热点和无线调试）：")
+        if 8 <= len(admin) <= 9:
+            break
+        print("长度要 8-9 位（WebREPL 最多 9 位，热点至少 8 位）")
+    return {"networks": networks, "admin_password": admin}
+
+
+ADMIN_PASSWORD_FILE = ".car_admin_password"  # 已 gitignore，用户自己创建
+
+
+def _admin_password() -> str | None:
+    """维护密码：环境变量 CYBERBRICK_ADMIN_PASSWORD，或 linx-client/.car_admin_password；都没有就交互输入。"""
+    from pathlib import Path
+
+    if os.environ.get("CYBERBRICK_ADMIN_PASSWORD"):
+        return os.environ["CYBERBRICK_ADMIN_PASSWORD"]
+    f = Path(__file__).resolve().parents[1] / ADMIN_PASSWORD_FILE
+    return f.read_text().strip() if f.exists() else None
+
+
+def _check_car_code(*files) -> None:
+    """上传前用 CPython 做语法检查，避免把语法错误写进车里导致连不上网（MicroPython 语法是其子集）。"""
+    for f in files:
+        compile(f.read_bytes(), str(f), "exec")
+
+
+def _open_car(args):
+    """连上车：--host 走 Wi-Fi 维护通道，否则走 USB raw REPL。返回 (repl, reset)，reset 会重启车并关闭连接。"""
+    import getpass
+
+    if args.host:
+        from .tank.netadmin import NetRepl
+
+        repl = NetRepl(args.host, _admin_password() or getpass.getpass("维护密码："))
+
+        def reset():
+            repl.reset()
+            repl.close()
+
+        return repl, reset
+
+    import serial
+
+    from .tank.serial_repl import RawRepl, find_port
+
+    name = args.port or find_port()
+    if not name:
+        raise SystemExit("找不到车的串口：请用 USB 连上车，或者装车后用 --host <车的IP> 走无线")
+    port = serial.Serial(name, 115200, timeout=0.1)
+    repl = RawRepl(port, timeout=10)
+    repl.enter()
+
+    def reset():
+        repl.exit()
+        port.write(b"import machine; machine.reset()\r\n")
+        time.sleep(0.3)
+        port.close()
+
+    return repl, reset
+
+
+def cmd_car_exec(args):
+    """在车上执行一段 MicroPython 代码并打印输出（调试用）。不重启车，执行完车保持停止状态。"""
+    repl, reset = _open_car(args)
+    code = args.code if args.code != "-" else sys.stdin.read()
+    try:
+        print(repl.exec(code))
+    finally:
+        if args.reset:
+            reset()
+
+
+def cmd_wifi_setup(args):
+    """把 Wi-Fi 控车程序写到车上。默认走 USB；--host 走 Wi-Fi 维护通道。密码只写到车上，不进仓库。"""
+    import json
+    from pathlib import Path
+
+    from .tank.serial_repl import put_file, remove_file
+
+    fw = Path(__file__).resolve().parents[2] / "firmware"
+    repl, reset = _open_car(args)
+    try:
+        if args.uninstall:
+            put_file(repl, "/boot.py", (fw / "backup-car" / "boot.py").read_bytes())
+            remove_file(repl, "/wifi.json")
+            remove_file(repl, "/app/wifi_main.py")
+            print("✅ 已恢复原厂程序")
+        else:
+            if not args.code_only:
+                cfg = _ask_wifi_config(args.ssid)
+                put_file(repl, "/wifi.json", json.dumps(cfg).encode())
+            _check_car_code(fw / "car" / "wifi_main.py", fw / "car" / "boot.py")
+            put_file(repl, "/app/wifi_main.py", (fw / "car" / "wifi_main.py").read_bytes())
+            put_file(repl, "/boot.py", (fw / "car" / "boot.py").read_bytes())
+            print("✅ 已写入，车正在重启。灯：黄=连接中，蓝=已连上 Wi-Fi，紫=没连上、自己开了热点 CyberBrick-Tank")
+            print("   开机时按住板载按键 = 原厂遥控")
+    finally:
+        reset()  # 重启后按新的 boot.py 选择模式（boot.py 最后写，中途失败也不会半新半旧）
 
 
 def cmd_activate(args):
@@ -96,8 +212,8 @@ async def _tank_test(args):
         ("后退 1 秒", lambda: tank.move("backward", 1000, args.max_speed)),
         ("左转 0.6 秒", lambda: tank.turn("left", 600, args.max_speed)),
         ("右转 0.6 秒", lambda: tank.turn("right", 600, args.max_speed)),
-        ("炮塔抬到 120", lambda: tank.aim(120)),
-        ("炮塔回到 90", lambda: tank.aim(90)),
+        ("炮塔左转 500ms", lambda: tank.turret("left", 500)),
+        ("炮塔右转 500ms", lambda: tank.turret("right", 500)),
     ]
     if not args.no_fire:
         steps.append(("发射 1 发（确认前方安全！）", lambda: tank.fire(1)))
@@ -134,6 +250,19 @@ def main():
 
     sub.add_parser("list-audio", help="列出音频设备")
 
+    p_wifi = sub.add_parser("wifi-setup", help="给车装 Wi-Fi 控车程序（默认 USB，--host 走无线；--uninstall 恢复原厂）")
+    p_wifi.add_argument("--port", help="车的串口")
+    p_wifi.add_argument("--host", help="车的 IP，走 Wi-Fi 维护通道而不是 USB；热点模式下是 192.168.4.1")
+    p_wifi.add_argument("--code-only", action="store_true", help="只更新车上的程序，不改 Wi-Fi 配置")
+    p_wifi.add_argument("--ssid", default="CMCC-7GE2", help="2.4G Wi-Fi 名称")
+    p_wifi.add_argument("--uninstall", action="store_true", help="恢复原厂 boot.py，删除 Wi-Fi 配置")
+
+    p_exec = sub.add_parser("car-exec", help="在车上执行一段代码并打印输出（调试用）")
+    p_exec.add_argument("code", help="MicroPython 代码，- 表示从标准输入读")
+    p_exec.add_argument("--port", help="车的串口")
+    p_exec.add_argument("--host", help="车的 IP，走 Wi-Fi 维护通道")
+    p_exec.add_argument("--reset", action="store_true", help="执行完重启车（Wi-Fi 模式下维护会话结束后车本来就会继续接收指令）")
+
     args = ap.parse_args()
     if args.cmd == "activate":
         cmd_activate(args)
@@ -145,6 +274,10 @@ def main():
         asyncio.run(_run(args))
     elif args.cmd == "tank-test":
         asyncio.run(_tank_test(args))
+    elif args.cmd == "car-exec":
+        cmd_car_exec(args)
+    elif args.cmd == "wifi-setup":
+        cmd_wifi_setup(args)
     elif args.cmd == "list-audio":
         import sounddevice as sd
 

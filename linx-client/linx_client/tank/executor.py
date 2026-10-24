@@ -10,6 +10,8 @@ from .backend import TankBackend
 MAX_ACTION_MS = 5000
 MAX_QUEUE_MS = 15000
 FAILSAFE_SLACK_MS = 300
+MAX_TURRET_MS = 3000
+TURRET_SPEED = 45  # 与原厂遥控（右肩摇杆 ±45）一致
 
 
 @dataclass
@@ -108,9 +110,11 @@ class TankExecutor:
         name = "左转" if direction == "left" else "右转"
         return self._enqueue(Action(f"{name} {ms}ms", ms, lambda: self._drive_for(left, right, ms)))
 
-    def aim(self, angle: int) -> str:
-        a = max(0, min(int(angle), 180))
-        return self._enqueue(Action(f"炮塔角度 {a}", 400, lambda: self._aim(a)))
+    def turret(self, direction: str, duration_ms: int) -> str:
+        sp = TURRET_SPEED if direction == "left" else -TURRET_SPEED
+        ms = min(int(duration_ms), MAX_TURRET_MS)
+        name = "炮塔左转" if direction == "left" else "炮塔右转"
+        return self._enqueue(Action(f"{name} {ms}ms", ms, lambda: self._turret_for(sp, ms)))
 
     def fire(self, shots: int = 1) -> str:
         if not self.fire_enabled:
@@ -124,9 +128,8 @@ class TankExecutor:
             for _ in range(2):
                 await self._drive_for(0, self._speed(80), 500)
                 await self._drive_for(self._speed(80), 0, 500)
-            await self._aim(60)
-            await self._aim(120)
-            await self._aim(90)
+            await self._turret_for(TURRET_SPEED, 400)
+            await self._turret_for(-TURRET_SPEED, 400)
 
         return self._enqueue(Action("跳舞", 3200, run))
 
@@ -147,9 +150,12 @@ class TankExecutor:
         finally:
             await self._safe_halt()
 
-    async def _aim(self, angle: int):
-        await self.backend.aim(angle)
-        await asyncio.sleep(0.4)
+    async def _turret_for(self, speed: int, ms: int):
+        try:
+            await self.backend.turret(speed, ms + FAILSAFE_SLACK_MS)
+            await asyncio.sleep(ms / 1000)
+        finally:
+            await self._safe_halt()
 
     async def _fire(self, n: int):
         for _ in range(n):
