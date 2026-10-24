@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import os
 import sys
 import threading
 import time
@@ -46,6 +47,25 @@ def _ask_wifi_config(default_ssid: str) -> dict:
     return {"networks": networks, "admin_password": admin}
 
 
+ADMIN_PASSWORD_FILE = ".car_admin_password"  # 已 gitignore，用户自己创建
+
+
+def _admin_password() -> str | None:
+    """维护密码：环境变量 CYBERBRICK_ADMIN_PASSWORD，或 linx-client/.car_admin_password；都没有就交互输入。"""
+    from pathlib import Path
+
+    if os.environ.get("CYBERBRICK_ADMIN_PASSWORD"):
+        return os.environ["CYBERBRICK_ADMIN_PASSWORD"]
+    f = Path(__file__).resolve().parents[1] / ADMIN_PASSWORD_FILE
+    return f.read_text().strip() if f.exists() else None
+
+
+def _check_car_code(*files) -> None:
+    """上传前用 CPython 做语法检查，避免把语法错误写进车里导致连不上网（MicroPython 语法是其子集）。"""
+    for f in files:
+        compile(f.read_bytes(), str(f), "exec")
+
+
 def _open_car(args):
     """连上车：--host 走 Wi-Fi 维护通道，否则走 USB raw REPL。返回 (repl, reset)，reset 会重启车并关闭连接。"""
     import getpass
@@ -53,7 +73,7 @@ def _open_car(args):
     if args.host:
         from .tank.netadmin import NetRepl
 
-        repl = NetRepl(args.host, getpass.getpass("维护密码："))
+        repl = NetRepl(args.host, _admin_password() or getpass.getpass("维护密码："))
 
         def reset():
             repl.reset()
@@ -111,6 +131,7 @@ def cmd_wifi_setup(args):
             if not args.code_only:
                 cfg = _ask_wifi_config(args.ssid)
                 put_file(repl, "/wifi.json", json.dumps(cfg).encode())
+            _check_car_code(fw / "car" / "wifi_main.py", fw / "car" / "boot.py")
             put_file(repl, "/app/wifi_main.py", (fw / "car" / "wifi_main.py").read_bytes())
             put_file(repl, "/boot.py", (fw / "car" / "boot.py").read_bytes())
             print("✅ 已写入，车正在重启。灯：黄=连接中，蓝=已连上 Wi-Fi，紫=没连上、自己开了热点 CyberBrick-Tank")
