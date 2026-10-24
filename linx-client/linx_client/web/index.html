@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>语音坦克控制台</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --line: #e3e5ea; --text: #1b1d22; --muted: #6b7180;
+    --accent: #2f6fed; --accent-soft: #e6eefe; --user: #2f6fed; --user-text: #fff;
+    --bot: #eef0f4; --good: #1f9d55; --warn: #c98a12; --bad: #d93a3a; --bad-soft: #fde8e8;
+    --tool: #f3f0ff; --tool-text: #5b3fc4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111317; --panel: #1a1d23; --line: #2a2e36; --text: #e8eaee; --muted: #8b92a1;
+      --accent: #5b8cff; --accent-soft: #1f2a44; --user: #3d6fe0; --user-text: #fff;
+      --bot: #242831; --good: #3ccf7e; --warn: #e3a93a; --bad: #ff5a5a; --bad-soft: #3a1f22;
+      --tool: #2a2440; --tool-text: #b9a6ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+    display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 12px 20px;
+    border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+    border-radius: 999px; font-size: 13px; background: var(--bot); color: var(--muted);
+  }
+  .pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .pill.connected { color: var(--good); }
+  .pill.connecting { color: var(--warn); }
+  .pill.disconnected { color: var(--bad); }
+  .pill.speaking { color: var(--accent); }
+  .pill[hidden] { display: none; }
+  .spacer { flex: 1; }
+  .hint { color: var(--muted); font-size: 13px; }
+
+  main {
+    flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 340px;
+    gap: 16px; padding: 16px 20px;
+  }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+
+  /* 对话 */
+  .chat { display: flex; flex-direction: column; min-height: 0; }
+  #log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .empty { margin: auto; color: var(--muted); text-align: center; }
+  .msg { max-width: 78%; padding: 8px 12px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; }
+  .msg.user { align-self: flex-end; background: var(--user); color: var(--user-text); border-bottom-right-radius: 4px; }
+  .msg.bot { align-self: flex-start; background: var(--bot); border-bottom-left-radius: 4px; }
+  .msg .who { display: block; font-size: 12px; opacity: .7; margin-bottom: 2px; }
+  .event {
+    align-self: flex-start; font-size: 13px; padding: 4px 10px; border-radius: 8px;
+    background: var(--tool); color: var(--tool-text); font-family: ui-monospace, Menlo, monospace;
+  }
+  .event.result { background: transparent; color: var(--muted); padding-left: 22px; }
+  .event.error { background: var(--bad-soft); color: var(--bad); }
+  .event.info { background: var(--bot); color: var(--muted); }
+  form.input { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
+  form.input input {
+    flex: 1; min-width: 0; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font: inherit;
+  }
+  button {
+    font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    border-radius: 8px; padding: 10px 14px; cursor: pointer; user-select: none; -webkit-user-select: none;
+  }
+  button:hover { border-color: var(--accent); }
+  button:active { transform: translateY(1px); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* 右侧 */
+  .side { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow-y: auto; }
+  .section { padding: 16px; }
+  .section h2 { margin: 0 0 12px; font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: .02em; }
+  .stop {
+    width: 100%; padding: 18px; font-size: 20px; font-weight: 700; letter-spacing: .1em;
+    background: var(--bad); border-color: var(--bad); color: #fff; border-radius: 12px;
+  }
+  .stop:hover { filter: brightness(1.08); border-color: var(--bad); }
+  .seg { display: flex; background: var(--bg); border-radius: 8px; padding: 3px; margin-bottom: 14px; }
+  .seg button { flex: 1; border: 0; background: transparent; padding: 6px; font-size: 14px; color: var(--muted); }
+  .seg button.on { background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+  .mic {
+    width: 100%; padding: 22px 12px; border-radius: 12px; font-size: 16px; font-weight: 600;
+    background: var(--accent-soft); color: var(--accent); border-color: transparent;
+  }
+  .mic.live { background: var(--accent); color: #fff; }
+  .mic.live::after { content: " ●"; animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+  .pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .pad button { padding: 14px 4px; font-size: 14px; }
+  .pad .fire { color: var(--bad); border-color: var(--bad); }
+  dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 14px; }
+  dt { color: var(--muted); }
+  dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+
+  @media (max-width: 760px) {
+    main { grid-template-columns: 1fr; padding: 12px 16px; }
+    .chat { min-height: 50vh; }
+    header { padding: 12px 16px; flex-wrap: wrap; }
+    .hint { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>语音坦克控制台</h1>
+  <span id="conn" class="pill connecting">连接中</span>
+  <span id="speaking" class="pill speaking" hidden>小车说话中</span>
+  <span class="spacer"></span>
+  <span class="hint">Esc 急停 · 按住空格说话</span>
+</header>
+
+<main>
+  <section class="card chat">
+    <div id="log"><div class="empty" id="empty">对着麦克风说「往前走两秒然后开一炮」<br>或者在下面输入文字</div></div>
+    <form class="input" id="form">
+      <input id="text" placeholder="输入指令，回车发送，例如：炮塔左转一下" autocomplete="off">
+      <button class="primary" type="submit">发送</button>
+    </form>
+  </section>
+
+  <aside class="side">
+    <div class="card section">
+      <button class="stop" id="stop">急 停</button>
+    </div>
+
+    <div class="card section">
+      <h2>语音</h2>
+      <div class="seg" id="mode">
+        <button data-mode="open" class="on">麦克风常开</button>
+        <button data-mode="ptt">按住说话</button>
+      </div>
+      <button class="mic" id="mic">正在听</button>
+    </div>
+
+    <div class="card section">
+      <h2>手动控制</h2>
+      <div class="pad">
+        <button data-action="turret_left">炮塔 ⟲</button>
+        <button data-action="forward">前进</button>
+        <button data-action="turret_right">炮塔 ⟳</button>
+        <button data-action="left">左转</button>
+        <button data-action="dance">跳舞</button>
+        <button data-action="right">右转</button>
+        <span></span>
+        <button data-action="backward">后退</button>
+        <button data-action="fire" class="fire">开火</button>
+      </div>
+    </div>
+
+    <div class="card section">
+      <h2>小车状态</h2>
+      <dl>
+        <dt>当前动作</dt><dd id="s-current">空闲</dd>
+        <dt>排队</dt><dd id="s-queued">0</dd>
+        <dt>速度上限</dt><dd id="s-speed">–</dd>
+        <dt>发射</dt><dd id="s-fire">–</dd>
+      </dl>
+    </div>
+  </aside>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const log = $("log");
+let ws, mode = "open", micOn = true;
+
+function send(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+
+function add(cls, text, who) {
+  $("empty")?.remove();
+  const el = document.createElement("div");
+  el.className = cls;
+  if (who) {
+    const w = document.createElement("span");
+    w.className = "who";
+    w.textContent = who;
+    el.appendChild(w);
+  }
+  el.appendChild(document.createTextNode(text));
+  const stick = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  log.appendChild(el);
+  if (stick) log.scrollTop = log.scrollHeight;
+}
+
+const TOOL_NAMES = {
+  "self.tank.move": "移动", "self.tank.turn": "转向", "self.tank.turret": "炮塔",
+  "self.tank.fire": "开火", "self.tank.stop": "停车", "self.tank.dance": "跳舞",
+  "self.get_device_status": "查询状态",
+};
+
+// 平台连上后会自动查询状态，属于后台行为，不在对话里显示
+const HIDDEN_TOOLS = new Set(["self.get_device_status"]);
+
+function render(e) {
+  if ((e.type === "tool" || e.type === "tool_result") && HIDDEN_TOOLS.has(e.name)) return;
+  switch (e.type) {
+    case "user": add("msg user", e.text, "你"); break;
+    case "bot": add("msg bot", e.text, "小车"); break;
+    case "tool": {
+      const args = Object.entries(e.arguments || {}).map(([k, v]) => `${k}=${v}`).join(" ");
+      add("event", `🔧 ${TOOL_NAMES[e.name] || e.name} ${args}`);
+      break;
+    }
+    case "tool_result": add(e.error ? "event error" : "event result", "→ " + e.text); break;
+    case "manual": add("event", "🕹 " + e.text); break;
+    case "info": add("event info", e.text); break;
+    case "error": add("event error", "⚠ " + e.text); break;
+  }
+}
+
+function setConn(state) {
+  const el = $("conn");
+  el.className = "pill " + state;
+  el.textContent = { connected: "已连接灵矽", connecting: "连接中", disconnected: "已断开", offline: "控制台离线" }[state] || state;
+}
+
+function setStatus(s) {
+  $("s-current").textContent = s.current || "空闲";
+  $("s-queued").textContent = s.queued.length ? s.queued.join("、") : "0";
+  $("s-speed").textContent = s.max_speed + "%";
+  $("s-fire").textContent = s.fire_enabled ? `可用 · 已发 ${s.shots_fired}` : "已锁定";
+}
+
+function setMic(on) {
+  micOn = on;
+  const b = $("mic");
+  b.classList.toggle("live", on);
+  if (mode === "open") b.textContent = on ? "正在听 · 点击静音" : "已静音 · 点击开启";
+  else b.textContent = on ? "松开发送" : "按住说话";
+}
+
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll("#mode button").forEach((b) => b.classList.toggle("on", b.dataset.mode === m));
+  send({ type: "mic", on: m === "open" });
+  setMic(m === "open");
+}
+
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onmessage = (ev) => {
+    const e = JSON.parse(ev.data);
+    if (e.type === "init") {
+      log.querySelectorAll(".msg, .event").forEach((n) => n.remove());
+      e.history.forEach(render);
+      setConn(e.conn);
+      setStatus(e.status);
+      setMic(e.mic);
+      if (mode === "ptt" && e.mic) send({ type: "mic", on: false });
+    } else if (e.type === "conn") setConn(e.state);
+    else if (e.type === "status") setStatus(e.status);
+    else if (e.type === "mic") setMic(e.on);
+    else if (e.type === "speaking") $("speaking").hidden = !e.on;
+    else render(e);
+  };
+  ws.onclose = () => { setConn("offline"); setTimeout(connect, 1000); };
+}
+
+// 急停：按钮和 Esc
+const stop = () => send({ type: "stop" });
+$("stop").onclick = stop;
+
+// 文本
+$("form").onsubmit = (ev) => {
+  ev.preventDefault();
+  const t = $("text").value.trim();
+  if (!t) return;
+  send({ type: "text", text: t });
+  $("text").value = "";
+};
+
+// 手动控制
+document.querySelectorAll("[data-action]").forEach((b) => {
+  b.onclick = () => send({ type: "action", name: b.dataset.action });
+});
+
+// 麦克风：常开模式点击切换静音；按住说话模式按下开、松开关
+document.querySelectorAll("#mode button").forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
+const mic = $("mic");
+const talk = (on) => { if (mode === "ptt" && micOn !== on) { send({ type: "mic", on }); setMic(on); } };
+mic.onclick = () => { if (mode === "open") send({ type: "mic", on: !micOn }); };
+mic.addEventListener("pointerdown", () => talk(true));
+["pointerup", "pointerleave", "pointercancel"].forEach((t) => mic.addEventListener(t, () => talk(false)));
+
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") { stop(); return; }
+  if (ev.code === "Space" && document.activeElement !== $("text") && !ev.repeat) {
+    ev.preventDefault();
+    if (mode !== "ptt") setMode("ptt");
+    talk(true);
+  }
+});
+document.addEventListener("keyup", (ev) => {
+  if (ev.code === "Space" && document.activeElement !== $("text")) talk(false);
+});
+
+connect();
+</script>
+</body>
+</html>

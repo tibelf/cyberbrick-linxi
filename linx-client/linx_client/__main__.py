@@ -195,6 +195,16 @@ async def _run(args):
         mic_device=args.mic,
         speaker_device=args.speaker,
     )
+    if args.web:
+        import webbrowser
+
+        from .web import WebConsole
+
+        console = WebConsole(tank, session, port=args.web_port)
+        session.on_event = console.publish
+        await console.start()
+        print(f"🌐 网页控制台：{console.url}")
+        webbrowser.open(console.url)
     done = asyncio.Event()
     _start_console(asyncio.get_running_loop(), tank, session, done)
     runner = asyncio.create_task(session.run_forever())
@@ -244,6 +254,8 @@ def main():
     p_run.add_argument("--speaker", help="扬声器设备名或序号")
     p_run.add_argument("--ws-url", help="覆盖 WebSocket 地址")
     p_run.add_argument("--token", help="直接指定 token，跳过 OTA")
+    p_run.add_argument("--web", action="store_true", help="同时打开网页控制台（对话记录、急停、按住说话、手动控车）")
+    p_run.add_argument("--web-port", type=int, default=8080, help="网页控制台端口")
 
     p_test = sub.add_parser("tank-test", help="逐步测试小车动作（先把车架空！）")
     _add_tank_args(p_test)
