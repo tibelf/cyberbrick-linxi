@@ -110,6 +110,11 @@ def _connect(cfg):
         while not sta.isconnected() and time.ticks_diff(time.ticks_ms(), t0) < 15000:
             time.sleep_ms(200)
         if sta.isconnected():
+            try:
+                # 关掉 Wi-Fi 省电：省电时射频间歇休眠，会漏收广播，控车指令也多几十到上百毫秒延迟
+                sta.config(pm=sta.PM_NONE)
+            except Exception as e:
+                print('[wifi] 关闭省电失败', e)
             return net['ssid'], sta.ifconfig()[0]
         sta.disconnect()
     sta.active(False)

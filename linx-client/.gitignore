@@ -3,3 +3,4 @@ __pycache__/
 .pytest_cache/
 .venv/
 .car_admin_password
+.car_host

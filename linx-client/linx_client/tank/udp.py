@@ -8,6 +8,7 @@ import asyncio
 import os
 import socket
 import threading
+from pathlib import Path
 
 PORT = 4210
 
@@ -22,28 +23,48 @@ def _lan_ip() -> str:
         probe.close()
 
 
-def discover(port: int = PORT, timeout: float = 1.5) -> str | None:
-    """广播 ping，返回第一台应答的车的 IP。
+CACHE_FILE = Path(__file__).resolve().parents[2] / ".car_host"  # 上次找到的车的 IP（已 gitignore）
 
-    电脑上有虚拟网卡（Docker/虚拟机的 bridge）时，255.255.255.255 可能从别的网卡发出去，
-    所以绑定到默认网卡，并额外发一次该网段的广播（按 /24 估算，家用路由器基本都是）。
+
+def discover(port: int = PORT, timeout: float = 0.6) -> str | None:
+    """找局域网里 Wi-Fi 模式的车，返回 IP。
+
+    ESP32 开着 Wi-Fi 省电时经常漏收广播，所以按可靠程度依次尝试：
+    上次找到的 IP → 广播（发 3 轮）→ 把本网段 254 个地址逐个单播问一遍。
+    绑定默认网卡：电脑上有虚拟网卡（Docker/虚拟机的 bridge）时，广播可能从别的网卡发出去。
+    网段按 /24 估算，家用路由器基本都是。
     """
     ip = _lan_ip()
+    base = ip.rsplit(".", 1)[0]
+    cached = CACHE_FILE.read_text().strip() if CACHE_FILE.exists() else None
+    rounds = [[cached]] if cached else []
+    rounds += [[base + ".255", "255.255.255.255"]] * 3
+    rounds.append([f"{base}.{i}" for i in range(1, 255)])
+
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    s.settimeout(timeout)
     try:
         s.bind((ip, 0))
-        for dst in (ip.rsplit(".", 1)[0] + ".255", "255.255.255.255"):
-            s.sendto(b"ping", (dst, port))
-        while True:
-            data, addr = s.recvfrom(64)
-            if data == b"pong":
-                return addr[0]
+        for targets in rounds:
+            for dst in targets:
+                try:
+                    s.sendto(b"ping", (dst, port))
+                except OSError:
+                    pass  # 个别地址发不出去（比如网关拒收）不影响其他
+            s.settimeout(timeout)
+            try:
+                while True:
+                    data, addr = s.recvfrom(64)
+                    if data == b"pong":
+                        CACHE_FILE.write_text(addr[0])
+                        return addr[0]
+            except socket.timeout:
+                continue
     except OSError:
         return None
     finally:
         s.close()
+    return None
 
 
 class UdpBackend:
