@@ -125,7 +125,7 @@
   <section class="card chat">
     <div id="log"><div class="empty" id="empty">对着麦克风说「往前走两秒然后开一炮」<br>或者在下面输入文字</div></div>
     <form class="input" id="form">
-      <input id="text" placeholder="输入指令，回车发送，例如：炮塔左转一下" autocomplete="off">
+      <input id="text" placeholder="输入指令，回车发送，例如：炮管抬高一点" autocomplete="off">
       <button class="primary" type="submit">发送</button>
     </form>
   </section>
@@ -147,9 +147,9 @@
     <div class="card section">
       <h2>手动控制</h2>
       <div class="pad">
-        <button data-action="turret_left">炮塔 ⟲</button>
+        <button data-action="barrel_up">炮管 ↑</button>
         <button data-action="forward">前进</button>
-        <button data-action="turret_right">炮塔 ⟳</button>
+        <button data-action="barrel_down">炮管 ↓</button>
         <button data-action="left">左转</button>
         <button data-action="dance">跳舞</button>
         <button data-action="right">右转</button>
@@ -197,7 +197,7 @@ function add(cls, text, who) {
 }
 
 const TOOL_NAMES = {
-  "self.tank.move": "移动", "self.tank.turn": "转向", "self.tank.turret": "炮塔",
+  "self.tank.move": "移动", "self.tank.turn": "转向", "self.tank.barrel": "炮管",
   "self.tank.fire": "开火", "self.tank.stop": "停车", "self.tank.dance": "跳舞",
   "self.get_device_status": "查询状态",
 };

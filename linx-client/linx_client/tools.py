@@ -30,19 +30,18 @@ def register_tank_tools(mcp: McpServer, tank: TankExecutor) -> None:
         [
             Prop("direction", "string", "left=左转，right=右转", enum=["left", "right"]),
             Prop("angle", "integer", "转动角度", minimum=10, maximum=360, default=90),
-            Prop("speed", "integer", "速度百分比", minimum=10, maximum=100, default=80),
         ],
         tank.turn,
     )
     mcp.add_tool(
-        "self.tank.turret",
-        "让炮塔向左或向右水平转动一段时间（车身不动）。用户说“炮塔左转/往右瞄一点/转一下炮塔”时调用。"
-        "没说时长默认 500 毫秒。",
+        "self.tank.barrel",
+        "抬高或压低炮管（俯仰）。用户说“炮管抬高/抬一点/往上瞄/压低/往下瞄”时调用。没说时长默认 300 毫秒，"
+        "“抬很多/抬到最高”用 1000 毫秒。左右瞄准靠 self.tank.turn 转动车身。",
         [
-            Prop("direction", "string", "left=左转，right=右转", enum=["left", "right"]),
-            Prop("duration_ms", "integer", "持续毫秒数", minimum=100, maximum=3000, default=500),
+            Prop("direction", "string", "up=抬高，down=压低", enum=["up", "down"]),
+            Prop("duration_ms", "integer", "持续毫秒数", minimum=100, maximum=1500, default=300),
         ],
-        tank.turret,
+        tank.barrel,
     )
     mcp.add_tool(
         "self.tank.fire",
@@ -52,7 +51,7 @@ def register_tank_tools(mcp: McpServer, tank: TankExecutor) -> None:
     )
     mcp.add_tool(
         "self.tank.dance",
-        "小车原地扭动并左右摆动炮塔，表演一段舞蹈。用户说“跳个舞/庆祝一下/打个招呼”时调用。",
+        "小车原地扭动并上下摆动炮管，表演一段舞蹈。用户说“跳个舞/庆祝一下/打个招呼”时调用。",
         [],
         tank.dance,
     )

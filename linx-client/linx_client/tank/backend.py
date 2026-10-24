@@ -14,7 +14,7 @@ class TankBackend(Protocol):
         """left/right: -100..100，正数前进。"""
 
     async def turret(self, speed: int, failsafe_ms: int) -> None:
-        """炮塔以 speed（-100..100，0 为停）持续转动。"""
+        """炮管俯仰舵机以 speed（-100..100，0 为停）持续转动（车端指令名沿用 turret）。"""
 
     async def fire(self, pulse_ms: int) -> None:
         """扣下扳机（一发），failsafe 到点自动回位。"""
