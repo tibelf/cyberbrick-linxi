@@ -60,6 +60,7 @@ python -m linx_client list-audio
    - `tank/executor.py`：动作队列。工具调用**立即返回「已安排」**，动作在后台 worker 中顺序执行，因此多次调用会自然串成序列。`stop()` 不进队列：清空队列、取消当前动作、halt。
    - `camera.py`：拍照工具。取图来源 `--camera`（数字=电脑摄像头 OpenCV，http=JPEG 快照地址如车载 ESP32S3，其他=文件）；视觉接口 url/token 来自 MCP initialize 的 `capabilities.vision`（`McpServer.vision`），字段 `question` + `file`（camera.jpg）
    - `seek.py`：看图闭环寻的 `self.tank.seek`（有 `--camera` 才注册）。平台一轮只执行一次工具调用，所以“拍照→换算→转向/前进→再拍”的循环在本地跑：`TankExecutor.start_mission` 启动，`stop()` 会连任务一起取消，每一步仍走 move/turn/fire 的安全约束；任务期间不插情绪小动作；结束后 `session.say()` 播报。视觉模型被要求按固定格式回答，解析不了就重问一次再放弃。外部摄像头（overhead）只问位置 `坦克=x,y；目标=x,y`（百分比坐标），车头方向由程序比较前进前后的位置算出（不要让视觉模型判断朝向，实测不可靠）；车载前视问 `找到=…；偏角=…；近=…`
+   - `wander.py`：自由闲逛 `self.tank.wander`（有 `--camera` 才注册）。**没有步数上限，只有 stop()（语音“停”、回车、网页急停）才结束**；每段拍照问空地方向 → 选方向（多数顺着走）→ 转向 → 前进 0.4–1.2s，随机穿插小动作（`emote(..., from_mission=True)`、摇炮管、停顿）。走了没挪动或四周堵死就后退掉头；外部摄像头下靠近画面边缘不往外走。**闲逛绝不开火**。和平台断开时暂停（`paused=lambda: session.ws is None`），重连后继续；一步出错不结束任务，连续 3 次看不清才停下播报。新任务（seek/wander）会接替正在跑的任务
    - `tank/backend.py` 定义 `TankBackend` Protocol + `MockBackend`；`serial_repl.py` 是实车驱动。
 3. **CyberBrick Core（执行和保底）**：`serial_repl.py` 连接时进入 raw REPL，一次性注入 `BOOTSTRAP`（定义 `drive/aim/fire/halt` + `machine.Timer` 看门狗），之后每条指令只发一行函数调用，设备端不 sleep。
 

@@ -171,21 +171,21 @@ def test_stop_cancels_mission():
     asyncio.run(main())
 
 
-def test_second_mission_rejected_and_bad_answers_abort():
+def test_new_mission_replaces_old_and_bad_answers_abort():
     async def main():
         tank = TankExecutor(MockBackend(verbose=False))
         await tank.start()
+
+        async def never(q):
+            await asyncio.sleep(10)
+            return ""
+
+        Seeker(tank, never)("杯子", "aim", False)
         ask, _ = _scripted(["我也不知道", "看不清"])
         seeker = Seeker(tank, ask, view="overhead")
         said = []
         seeker.say = lambda t: _append(said, t)
-        seeker("杯子", "aim", False)
-        try:
-            seeker("杯子", "aim", False)
-        except ValueError as e:
-            assert "正在执行" in str(e)
-        else:
-            raise AssertionError("同时只能有一个任务")
+        assert "已停止之前的「对准杯子」" in seeker("瓶子", "aim", False)
         while tank.status()["mission"]:
             await asyncio.sleep(0.02)
         await tank.close()

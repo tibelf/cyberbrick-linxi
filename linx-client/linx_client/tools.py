@@ -88,9 +88,19 @@ CAMERA_HOWTO = {
 }
 
 
-def register_camera_tools(mcp: McpServer, photo, view: str = "overhead", seeker=None) -> None:
+def register_camera_tools(mcp: McpServer, photo, view: str = "overhead", seeker=None, wanderer=None) -> None:
     """photo 是 camera.PhotoTool；只有启动时指定了 --camera 才注册。view 决定怎么教大模型看图。
     seeker 是 seek.Seeker：本地闭环寻的，大模型调用一次，小车自己边看边调。"""
+    if wanderer is not None:
+        mcp.add_tool(
+            "self.tank.wander",
+            "让小车自由闲逛：它会一直到处逛、随手做些小动作，边走边看摄像头避开障碍物和死角，"
+            "**一直逛到用户说“停”为止**。用户说“自己逛逛/随便走走/去玩吧/巡逻一下”时调用一次即可，"
+            "然后回一句“好嘞，我出去溜达啦”，不要再调用其他移动工具。闲逛时小车绝不会开火。"
+            "闲逛中用户又给了别的任务（例如去某个东西那里），直接调用对应工具，它会接替闲逛。",
+            [],
+            wanderer,
+        )
     if seeker is not None:
         mcp.add_tool(
             "self.tank.seek",

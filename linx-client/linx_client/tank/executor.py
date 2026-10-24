@@ -98,18 +98,30 @@ class TankExecutor:
 
     def start_mission(self, desc: str, run: Callable[[], Awaitable[None]]) -> str:
         """启动一个会自己反复下发动作的闭环任务。它内部仍然只通过 move/turn/fire 等方法动车，
-        所以安全约束照常生效；stop() 会连任务一起取消。"""
-        if self._mission and not self._mission.done():
-            raise ValueError(f"正在执行「{self._mission_desc}」，先说“停”再换新任务")
+        所以安全约束照常生效；stop() 会连任务一起取消。
+        已有任务在跑时，新任务直接接替它（用户最新的要求优先，例如闲逛中说“去瓶子那里”）。"""
+        replaced = self._mission_desc if self._mission and not self._mission.done() else None
+        if replaced:
+            self._mission.cancel()
+            self._queue.clear()
+            if self._current and not self._current.done():
+                self._current.cancel()  # 被取消的动作会在 finally 里 halt
         self._mission_desc = desc
         self._mission = asyncio.create_task(run())
         self._mission.add_done_callback(lambda t: t.cancelled() or t.exception())  # 吞掉未取出的异常警告
-        return f"开始：{desc}"
+        return f"开始：{desc}" + (f"（已停止之前的「{replaced}」）" if replaced else "")
 
     async def wait_idle(self):
         """等队列里的动作全部做完（闭环任务每一步动完再拍下一张）。"""
         while self._current or self._queue:
             await asyncio.sleep(0.05)
+
+    async def halt_now(self):
+        """停下当前动作、清空队列，但不取消任务（任务自己决定之后怎么继续，例如断线暂停）。"""
+        self._queue.clear()
+        if self._current and not self._current.done():
+            self._current.cancel()
+        await self._safe_halt()
 
     async def stop(self) -> str:
         if self._mission and not self._mission.done():
@@ -179,9 +191,11 @@ class TankExecutor:
         self.persona = persona
         return f"已切换为{PERSONAS[persona]}模式"
 
-    def emote(self, kind: str) -> str | None:
-        """情绪小动作。车正忙（有动作在做或在排队）时跳过，不打扰正事；动作都成对抵消，车和炮管回到原位。"""
-        if kind not in EMOTES or self._current or self._queue or (self._mission and not self._mission.done()):
+    def emote(self, kind: str, from_mission: bool = False) -> str | None:
+        """情绪小动作。车正忙（有动作在做或在排队、或有任务在跑）时跳过，不打扰正事；动作都成对抵消，车和炮管回到原位。
+        from_mission=True 表示是任务自己要做的小动作（例如闲逛时扭一扭），不受“有任务在跑”的限制。"""
+        busy_mission = self._mission and not self._mission.done() and not from_mission
+        if kind not in EMOTES or self._current or self._queue or busy_mission:
             return None
         s = self._speed(100)
         moves = {
