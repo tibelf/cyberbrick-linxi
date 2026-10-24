@@ -2,16 +2,16 @@
 
 import asyncio
 
-from linx_client.seek import Seeker, clock_to_turn, parse_front, parse_overhead
+from linx_client.seek import Seeker, parse_front, parse_positions, turn_needed
 from linx_client.tank import MockBackend, TankExecutor
 
 
-def test_parse_overhead():
-    assert parse_overhead("找到=是；方向=3；距离=2") == {"found": True, "clock": 3, "dist": 2.0}
-    assert parse_overhead("找到：是，方向：12，距离：0.5 个车身") == {"found": True, "clock": 12, "dist": 0.5}
-    assert parse_overhead("找到=否") == {"found": False}
-    assert parse_overhead("杯子在右边") is None
-    assert parse_overhead("找到=是；方向=13；距离=1") is None
+def test_parse_positions():
+    assert parse_positions("坦克=20,60；目标=75,55") == {"car": (20.0, 60.0), "target": (75.0, 55.0)}
+    assert parse_positions("坦克=(20, 60)，目标=（75，55）") == {"car": (20.0, 60.0), "target": (75.0, 55.0)}
+    assert parse_positions("坦克=20,60；目标=无") == {"car": (20.0, 60.0), "target": None}
+    assert parse_positions("找到=是；方向=4；距离=2") is None
+    assert parse_positions("坦克在左边") is None
 
 
 def test_parse_front():
@@ -20,12 +20,12 @@ def test_parse_front():
     assert parse_front("找到=否") == {"found": False}
 
 
-def test_clock_to_turn():
-    assert clock_to_turn(12) is None
-    assert clock_to_turn(3) == ("right", 90)
-    assert clock_to_turn(6) == ("right", 180)
-    assert clock_to_turn(9) == ("left", 90)
-    assert clock_to_turn(11) == ("left", 30)
+def test_turn_needed():
+    # 画面坐标 y 向下：车头朝右，目标在画面上方 → 左转 90°；在下方 → 右转 90°
+    assert round(turn_needed((1, 0), (0, -1))) == 90
+    assert round(turn_needed((1, 0), (0, 1))) == -90
+    assert abs(round(turn_needed((1, 0), (-1, 0)))) == 180
+    assert round(turn_needed((1, 0), (5, 0))) == 0
 
 
 def _scripted(answers):
@@ -55,20 +55,62 @@ def _calls(be, kind):
     return [c for c in be.calls if c[0] == kind]
 
 
-def test_overhead_turn_then_approach():
+def test_external_straight_approach():
     async def main():
         be = MockBackend(verbose=False)
         tank = TankExecutor(be)
         await tank.start()
-        ask, asked = _scripted(["找到=是；方向=3；距离=2", "找到=是；方向=12；距离=2", "找到=是；方向=12；距离=1"])
-        seeker = Seeker(tank, ask, view="overhead", car_len_ms=50)
-        said = await _run_mission(seeker, tank, "红色杯子", "approach", False)
+        ask, asked = _scripted(["坦克=20,60；目标=80,60", "坦克=25,60；目标=80,60", "坦克=72,60；目标=80,60"])
+        said = await _run_mission(Seeker(tank, ask, probe_ms=50), tank, "饮料瓶", "approach", False)
         await tank.close()
         drives = _calls(be, "drive")
-        assert drives[0][1] > 0 > drives[0][2]  # 3 点钟 → 原地右转
-        assert drives[1][1] == drives[1][2] > 0  # 12 点钟 → 直走
-        assert len(asked) == 3 and "红色杯子" in asked[0]
-        assert said and said[0].startswith("已走到红色杯子") and not _calls(be, "fire")
+        assert all(d[1] == d[2] > 0 for d in drives)  # 车头已经朝着目标：只前进，不转向
+        assert len(drives) == 2 and len(asked) == 3 and "饮料瓶" in asked[0]
+        assert said[0].startswith("已走到饮料瓶") and not _calls(be, "fire")
+
+    asyncio.run(main())
+
+
+def test_external_turns_by_measured_heading():
+    async def main():
+        be = MockBackend(verbose=False)
+        tank = TankExecutor(be)
+        await tank.start()
+        # 目标在画面上方，试探前进后发现车头朝右 → 应左转约 90°
+        ask, _ = _scripted(["坦克=50,80；目标=50,20", "坦克=55,80；目标=50,20", "坦克=52,26；目标=50,20"])
+        said = await _run_mission(Seeker(tank, ask, probe_ms=50), tank, "饮料瓶", "approach", False)
+        await tank.close()
+        drives = _calls(be, "drive")
+        assert drives[0][1] == drives[0][2] > 0  # 试探前进
+        assert drives[1][1] < 0 < drives[1][2]  # 左转
+        assert drives[2][1] == drives[2][2] > 0  # 再前进
+        assert said[0].startswith("已走到")
+
+    asyncio.run(main())
+
+
+def test_external_gives_up_when_car_does_not_move():
+    async def main():
+        tank = TankExecutor(MockBackend(verbose=False))
+        await tank.start()
+        ask, _ = _scripted(["坦克=20,60；目标=80,60"] * 4)
+        said = await _run_mission(Seeker(tank, ask, probe_ms=50), tank, "饮料瓶", "approach", False)
+        await tank.close()
+        assert "看不出小坦克往哪个方向走" in said[0]
+
+    asyncio.run(main())
+
+
+def test_external_reports_missing_car_or_target():
+    async def main():
+        tank = TankExecutor(MockBackend(verbose=False))
+        await tank.start()
+        ask, _ = _scripted(["坦克=无；目标=80,60"])
+        said = await _run_mission(Seeker(tank, ask), tank, "饮料瓶", "approach", False)
+        ask2, _ = _scripted(["坦克=20,60；目标=无"])
+        said += await _run_mission(Seeker(tank, ask2), tank, "饮料瓶", "approach", False)
+        await tank.close()
+        assert "找不到小坦克" in said[0] and "没有看到饮料瓶" in said[1]
 
     asyncio.run(main())
 
@@ -112,9 +154,9 @@ def test_stop_cancels_mission():
 
         async def slow_ask(q):
             await asyncio.sleep(0.05)
-            return "找到=是；方向=12；距离=5"  # 永远在前面很远
+            return "坦克=10,50；目标=90,50"  # 永远离得很远
 
-        seeker = Seeker(tank, slow_ask, view="overhead", car_len_ms=2000)
+        seeker = Seeker(tank, slow_ask, view="overhead", probe_ms=2000)
         seeker("门", "approach", False)
         await asyncio.sleep(0.3)
         assert tank.status()["mission"]

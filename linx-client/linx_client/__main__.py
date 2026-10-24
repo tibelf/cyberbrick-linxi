@@ -290,7 +290,7 @@ def main():
     p_run.add_argument("--web-port", type=int, default=8080, help="网页控制台端口")
     p_run.add_argument("--camera", help="开启拍照工具：0=电脑摄像头序号，http://…=JPEG 快照地址，其他=图片文件")
     p_run.add_argument("--camera-view", choices=["overhead", "front"], default="overhead",
-                       help="overhead=场地正上方俯拍（车顶贴指向车头的箭头），front=摄像头装在车上朝前")
+                       help="overhead=摄像头固定在场地旁边（俯拍或斜拍，越高越好），front=摄像头装在车上朝前")
 
     p_cam = sub.add_parser("camera-test", help="拍一张照片存成文件，检查摄像头（不连平台）")
     p_cam.add_argument("--camera", default="0", help="同 run --camera")
