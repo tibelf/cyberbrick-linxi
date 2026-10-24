@@ -85,3 +85,21 @@ def test_queue_limit():
             tank.move("forward", 1000, 50)
 
     run(main())
+
+
+def test_turn_pivots_and_scales_by_angle_and_speed():
+    from linx_client.tank.executor import MS_PER_90_AT_FULL
+
+    async def main():
+        be = MockBackend(verbose=False)
+        tank = TankExecutor(be, max_speed=100)
+        await tank.start()
+        assert f"{MS_PER_90_AT_FULL}ms" in tank.turn("left", 90, 100)
+        assert f"{MS_PER_90_AT_FULL}ms" in tank.turn("right", 45, 50)  # 角度减半、速度减半，时长不变
+        await drain(tank)
+        await tank.close()
+        drives = [c for c in be.calls if c[0] == "drive"]
+        assert drives[0][1:3] == (-100, 100)  # 左转：左履带后退、右履带前进
+        assert drives[1][1:3] == (50, -50)
+
+    run(main())
