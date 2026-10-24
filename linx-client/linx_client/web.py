@@ -101,7 +101,10 @@ class WebConsole:
         t = cmd.get("type")
         if t == "stop":
             await self.tank.stop()
+            await self.session.abort()
             self.publish({"type": "info", "text": "急停"})
+        elif t == "abort":
+            await self.session.abort()
         elif t == "text":
             text = str(cmd.get("text", "")).strip()
             if text:
