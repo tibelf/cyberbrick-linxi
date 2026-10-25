@@ -15,6 +15,8 @@ MAX_BARREL_MS = 1500  # 俯仰有机械限位，转太久会顶住舵机
 # 炮管俯仰是 SERVO1 上的连续旋转舵机（原厂右肩摇杆上下控制），速度 45 与原厂一致；
 # 正负号决定哪边是“抬高”，2026-10-24 实车发现装反过一次，以实测为准
 BARREL_UP_SPEED = 45
+STEER_MS = 400  # steer 一条指令管多久（含看门狗余量）：任务每 0.1s 刷新，卡住 0.4s 车就自己停
+STEER_MAX_MS = 600
 HEARTBEAT_S = 5  # 空闲时每隔这么久问一下车还在不在（网页控制台显示在线状态、及时发现车重启）
 CHECK_TIMEOUT_S = 3
 GRANDPA_SPEED = 65  # 老爷爷模式的速度上限；再低落地就带不动履带（40% 实测带不动）
@@ -224,6 +226,19 @@ class TankExecutor:
         if self.persona == "drunk":
             return self._enqueue(Action(f"{name} {ms}ms 速度{abs(s)}（醉汉）", ms, lambda: self._stagger(s, ms), kind))
         return self._enqueue(Action(f"{name} {ms}ms 速度{abs(s)}", ms, lambda: self._drive_for(s, s, ms), kind))
+
+    async def steer(self, left: int, right: int, ms: int = STEER_MS):
+        """闭环任务专用：直接设两条履带速度（正数前进），只管 ms 毫秒——设备端看门狗到点自停，
+        所以任务每 0.1 秒左右刷新一次就能连续开，画面一卡车就停。只能在当前任务里调用；速度照样裁剪到限速。"""
+        if not self._mission or asyncio.current_task() is not self._mission:
+            raise RuntimeError("steer 只能由正在运行的闭环任务调用")
+        if self._queue or self._current:
+            raise RuntimeError("队列里还有动作，先等它做完")
+        clip = lambda v: max(-self.max_speed, min(int(v), self.max_speed))  # noqa: E731
+        left, right = clip(left), clip(right)
+        if left != right or left <= 0:
+            self.motion_epoch += 1  # 不是纯前进
+        await self.backend.drive(left, right, min(int(ms), STEER_MAX_MS))
 
     def turn(self, direction: str, angle: int, speed: int = 100) -> str:
         s = self._speed(speed)

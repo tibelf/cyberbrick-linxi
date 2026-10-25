@@ -1,4 +1,4 @@
-"""命令行入口：python -m linx_client {activate,run,tank-test,camera-test,list-audio,wifi-setup,car-exec}"""
+"""命令行入口：python -m linx_client {activate,run,tank-test,camera-test,marker-print,marker-test,list-audio,wifi-setup,car-exec}"""
 
 import argparse
 import asyncio
@@ -220,6 +220,14 @@ async def _run(args):
         # 和平台断开时听不到“停”，闲逛先暂停；重连后自动继续
         wanderer = Wanderer(tank, photo.ask, say=lambda text: session.say(text), view=args.camera_view,
                             paused=lambda: session.ws is None)
+        if args.marker:
+            from .marker_seek import MarkerSeeker
+
+            # 有标记就看标记边开边调；没贴标记时 MarkerSeeker 会退回上面的视觉模型版 seeker
+            seeker = MarkerSeeker(tank, photo.camera, _make_tracker(args), labels=_marker_labels(args),
+                                  ask=photo.ask, say=lambda text: session.say(text), fallback=seeker,
+                                  on_photo=lambda *a: photo.on_photo and photo.on_photo(*a))
+            print("🔳 标记跟踪：车顶 0 号标记，目标 " + (args.marker_targets or "1–9 号标记或颜色"))
         register_camera_tools(mcp, photo, view=args.camera_view, seeker=seeker, wanderer=wanderer)
         print(f"📷 摄像头：{args.camera}（需在智控台开启视觉分析）")
     session = LinxSession(
@@ -290,6 +298,54 @@ async def _tank_test(args):
         await tank.close()
 
 
+def _add_marker_args(p):
+    p.add_argument("--marker-size-cm", type=float, default=6.0, help="打印出来的标记黑框边长（厘米，打印后量一下）")
+    p.add_argument("--marker-targets", help="目标标记叫什么，例如 “1=绿色瓶子,2=红色盒子”；没登记的目标按颜色认")
+    p.add_argument("--car-height-cm", type=float, default=7.0, help="车顶标记离地高度（厘米）")
+    p.add_argument("--focal-ratio", type=float, default=0.8, help="摄像头焦距 ÷ 画面宽度（不标定时的估计值）")
+
+
+def _make_tracker(args):
+    from .marker import MarkerTracker
+
+    return MarkerTracker(args.marker_size_cm, args.car_height_cm, args.focal_ratio)
+
+
+def _marker_labels(args):
+    from .marker import parse_labels
+
+    return parse_labels(args.marker_targets)
+
+
+def cmd_marker_test(args):
+    """实时打印“目标在车头左/右几度、多远”，每秒存一张标注图，用来检查标记贴得对不对。"""
+    from .camera import _encode, make_camera
+    from .marker import resolve_target
+
+    cam, tracker = make_camera(args.camera), _make_tracker(args)
+    target = resolve_target(args.target, _marker_labels(args))
+    print(f"🔳 目标：{args.target}（{target.kind} {target.marker_id or target.color or ''}），Ctrl+C 退出；标注图存到 {args.out}")
+    last = 0.0
+    try:
+        while True:
+            frame = cam.frame()
+            s = tracker.locate(frame, target)
+            if s.car and s.target:
+                info = f"目标在车头{'左' if s.bearing > 0 else '右'} {abs(s.bearing):5.1f}°  距离 {s.distance:5.1f} cm"
+                if s.target_tilt is not None:
+                    info += f"  目标倾角 {s.target_tilt:4.0f}°"
+            else:
+                info = "看不到车顶 0 号标记" if not s.car else "看到车了，看不到目标"
+            print("\r" + info.ljust(60), end="", flush=True)
+            if time.monotonic() - last > 1:
+                last = time.monotonic()
+                with open(args.out, "wb") as f:
+                    f.write(_encode(tracker.annotate(frame, s)))
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        print()
+
+
 def main():
     ap = argparse.ArgumentParser(prog="linx_client", description="把电脑模拟成灵矽设备，语音控制 CyberBrick 小车")
     ap.add_argument("--state", default=".linx_device.json", help="虚拟设备身份文件")
@@ -315,6 +371,20 @@ def main():
     p_run.add_argument("--camera", help="开启拍照工具：0=电脑摄像头序号，http://…=JPEG 快照地址，其他=图片文件")
     p_run.add_argument("--camera-view", choices=["overhead", "front"], default="overhead",
                        help="overhead=摄像头固定在场地旁边（俯拍或斜拍，越高越好），front=摄像头装在车上朝前")
+
+    p_run.add_argument("--marker", action="store_true",
+                       help="用 ArUco 标记边开边调（车顶贴 0 号标记，见 marker-print）：摄像头可以固定，也可以手拿着跟拍")
+    _add_marker_args(p_run)
+
+    p_mp = sub.add_parser("marker-print", help="生成可打印的 ArUco 标记（SVG，按实际大小打印）")
+    p_mp.add_argument("--marker-size-cm", type=float, default=6.0, help="黑框边长（厘米）")
+    p_mp.add_argument("--out", default="markers.svg")
+
+    p_mt = sub.add_parser("marker-test", help="实时显示标记算出的方位和距离（不连平台、不动车）")
+    p_mt.add_argument("--camera", default="0", help="同 run --camera")
+    p_mt.add_argument("--target", default="1号", help="要找的目标，如 “1号”“绿色瓶子”")
+    p_mt.add_argument("--out", default="marker-test.jpg", help="每秒存一张标注图")
+    _add_marker_args(p_mt)
 
     p_cam = sub.add_parser("camera-test", help="拍一张照片存成文件，检查摄像头（不连平台）")
     p_cam.add_argument("--camera", default="0", help="同 run --camera")
@@ -356,6 +426,14 @@ def main():
         with open(args.out, "wb") as f:
             f.write(jpeg)
         print(f"📷 已保存 {args.out}（{len(jpeg) // 1024} KB）")
+    elif args.cmd == "marker-print":
+        from .marker import marker_svg
+
+        with open(args.out, "w", encoding="utf-8") as f:
+            f.write(marker_svg(args.marker_size_cm))
+        print(f"🔳 已生成 {args.out}：用浏览器打开，打印时选“实际大小/100%”。0 号贴车顶、箭头朝车头；1–3 号贴目标")
+    elif args.cmd == "marker-test":
+        cmd_marker_test(args)
     elif args.cmd == "car-exec":
         cmd_car_exec(args)
     elif args.cmd == "wifi-setup":

@@ -13,6 +13,7 @@
 
 import asyncio
 import json
+import threading
 import time
 import urllib.request
 import uuid
@@ -29,34 +30,82 @@ class Camera(Protocol):
     def snapshot(self) -> bytes:
         """返回一张 JPEG。"""
 
+    def frame(self):
+        """返回一帧 BGR 图像（numpy 数组，标记跟踪用；需要 OpenCV）。"""
+
+
+def _cv2():
+    try:
+        import cv2
+    except ImportError as e:
+        raise RuntimeError("需要 OpenCV：pip install opencv-python") from e
+    return cv2
+
+
+def _encode(frame) -> bytes:
+    cv2 = _cv2()
+    h, w = frame.shape[:2]
+    if w > MAX_WIDTH:
+        frame = cv2.resize(frame, (MAX_WIDTH, int(h * MAX_WIDTH / w)))
+    ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    if not ok:
+        raise RuntimeError("JPEG 编码失败")
+    return buf.tobytes()
+
 
 class OpenCVCamera:
-    def __init__(self, index: int = 0, warmup: int = 5):
-        self.index = index
-        self.warmup = warmup
+    """电脑摄像头。第一次取图时打开，之后一直开着、后台线程不停地读，取图直接拿最新一帧：
+    标记跟踪每秒要取十几帧，每次都重新打开太慢；刚打开的头一秒画面常常偏暗甚至全黑，也只在开头等一次。"""
 
-    def snapshot(self) -> bytes:
-        try:
-            import cv2
-        except ImportError as e:
-            raise RuntimeError("电脑摄像头需要 OpenCV：pip install opencv-python") from e
-        cap = cv2.VideoCapture(self.index)
-        try:
+    WARMUP_S = 1.0
+    STALE_S = 2.0  # 最新一帧超过这么久没更新，说明摄像头断了（手机连续互通相机断开等）
+
+    def __init__(self, index: int = 0):
+        self.index = index
+        self._cap = None
+        self._latest = None  # (frame, time)
+        self._lock = threading.Lock()
+
+    def _ensure(self):
+        with self._lock:
+            if self._cap is not None:
+                return
+            cv2 = _cv2()
+            cap = cv2.VideoCapture(self.index)
             if not cap.isOpened():
                 raise RuntimeError(f"打不开摄像头 {self.index}（macOS 需在「隐私与安全性 → 摄像头」里允许终端）")
-            frame = None
-            for _ in range(self.warmup + 1):  # 刚打开的几帧常常偏暗，丢掉
-                ok, frame = cap.read()
-                if not ok:
-                    raise RuntimeError(f"摄像头 {self.index} 读不到画面")
-            h, w = frame.shape[:2]
-            if w > MAX_WIDTH:
-                frame = cv2.resize(frame, (MAX_WIDTH, int(h * MAX_WIDTH / w)))
-            ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            if not ok:
-                raise RuntimeError("JPEG 编码失败")
-            return buf.tobytes()
-        finally:
+            self._cap = cap
+            threading.Thread(target=self._reader, daemon=True).start()
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < self.WARMUP_S or self._latest is None:
+            if time.monotonic() - t0 > 5:
+                raise RuntimeError(f"摄像头 {self.index} 读不到画面")
+            time.sleep(0.05)
+
+    def _reader(self):
+        while self._cap is not None:
+            ok, frame = self._cap.read()
+            if ok:
+                self._latest = (frame, time.monotonic())
+            else:
+                time.sleep(0.05)
+
+    def frame(self):
+        self._ensure()
+        frame, t = self._latest
+        if time.monotonic() - t > self.STALE_S:
+            raise RuntimeError(f"摄像头 {self.index} 已经 {time.monotonic() - t:.0f} 秒没有新画面，可能断开了")
+        return frame
+
+    def snapshot(self) -> bytes:
+        frame = self.frame()
+        if frame.mean() < 8:
+            raise RuntimeError(f"摄像头 {self.index} 拍到的是全黑画面：镜头被挡住了，或者没有摄像头权限")
+        return _encode(frame)
+
+    def close(self):
+        cap, self._cap = self._cap, None
+        if cap is not None:
             cap.release()
 
 
@@ -72,6 +121,14 @@ class HttpSnapshotCamera:
             raise RuntimeError(f"{self.url} 返回的不是 JPEG")
         return data
 
+    def frame(self):
+        import numpy as np
+
+        img = _cv2().imdecode(np.frombuffer(self.snapshot(), np.uint8), 1)
+        if img is None:
+            raise RuntimeError(f"{self.url} 的图片解不开")
+        return img
+
 
 class FileCamera:
     def __init__(self, path: str):
@@ -80,6 +137,12 @@ class FileCamera:
     def snapshot(self) -> bytes:
         with open(self.path, "rb") as f:
             return f.read()
+
+    def frame(self):
+        img = _cv2().imread(self.path)
+        if img is None:
+            raise RuntimeError(f"读不了图片 {self.path}")
+        return img
 
 
 def make_camera(spec: str | None) -> Camera | None:
