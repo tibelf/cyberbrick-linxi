@@ -22,8 +22,9 @@ INDEX = Path(__file__).with_name("web") / "index.html"
 
 
 class WebConsole:
-    def __init__(self, tank: TankExecutor, session: LinxSession, port: int = 8080):
+    def __init__(self, tank: TankExecutor, session: LinxSession, port: int = 8080, game=None):
         self.tank = tank
+        self.game = game  # game.TargetChallenge：打靶挑战计分板
         self.session = session
         self.port = port
         self.clients: set[ServerConnection] = set()
@@ -53,7 +54,7 @@ class WebConsole:
         """LinxSession 的 on_event 回调（在事件循环线程里调用）。"""
         if event.get("type") == "conn":
             self.conn_state = event["state"]
-        elif event.get("type") not in ("speaking", "photo"):  # 照片太大，不进历史
+        elif event.get("type") not in ("speaking", "photo", "game"):  # 照片太大、计分板只要最新的，不进历史
             self.history.append(event)
         self._broadcast(event)
 
@@ -86,6 +87,7 @@ class WebConsole:
                 "conn": self.conn_state,
                 "mic": self.session.mic_enabled,
                 "status": self.tank.status(),
+                "game": self.game.snapshot() if self.game else None,
             }, ensure_ascii=False))
             async for raw in ws:
                 try:
@@ -114,6 +116,15 @@ class WebConsole:
         elif t == "mic":
             self.session.mic_enabled = bool(cmd.get("on"))
             self._broadcast({"type": "mic", "on": self.session.mic_enabled})
+        elif t in ("game_start", "game_hit", "game_stop") and self.game:
+            if t == "game_start":
+                text = self.game.start(int(cmd.get("targets") or 3), int(cmd.get("seconds") or 120), str(cmd.get("player") or ""))
+            elif t == "game_hit":
+                text = self.game.hit(1)
+            else:
+                text = self.game.stop()
+            self.publish({"type": "info", "text": "🎯 " + text})
+            await self.session.say(text)  # 网页上点的也让小车念出来
         elif t == "action":
             fn = self.actions.get(cmd.get("name"))
             if fn is None:

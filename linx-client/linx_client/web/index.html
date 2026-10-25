@@ -110,6 +110,30 @@
   dt { color: var(--muted); }
   dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 
+  /* 打靶挑战 */
+  .g-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+  .g-form input {
+    width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font: inherit;
+  }
+  .g-form .full { grid-column: 1 / -1; }
+  .g-form label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+  .wide { width: 100%; }
+  .g-clock { font-size: 44px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .g-clock.low { color: var(--bad); }
+  .g-hits { text-align: center; font-size: 18px; color: var(--muted); margin: 4px 0 12px; }
+  .g-hits b { color: var(--text); font-size: 26px; }
+  .g-btns { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; margin-top: 12px; }
+  .g-btns .primary { padding: 16px; font-size: 17px; font-weight: 650; }
+  .g-last { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); font-size: 14px; }
+  .g-last[hidden] { display: none; }
+  .g-board { margin: 12px 0 0; padding: 0; list-style: none; font-size: 14px; }
+  .g-board li { display: flex; gap: 8px; padding: 4px 0; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  .g-board li .n { width: 1.5em; color: var(--muted); }
+  .g-board li .p { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .g-board li .d { color: var(--muted); font-size: 12px; align-self: center; }
+  .g-board li.me { color: var(--accent); font-weight: 600; }
+
   @media (max-width: 760px) {
     main { grid-template-columns: 1fr; padding: 12px 16px; }
     .chat { min-height: 50vh; }
@@ -139,6 +163,34 @@
   <aside class="side">
     <div class="card section">
       <button class="stop" id="stop">急 停</button>
+    </div>
+
+    <div class="card section">
+      <h2>打靶挑战</h2>
+      <div id="g-idle">
+        <div class="g-form">
+          <label class="full">玩家<input id="g-player" placeholder="名字" maxlength="12"></label>
+          <label>目标个数<input id="g-targets" type="number" min="1" max="10" value="3"></label>
+          <label>限时（秒）<input id="g-seconds" type="number" min="20" max="600" step="10" value="120"></label>
+        </div>
+        <button class="primary wide" id="g-start">开始挑战</button>
+      </div>
+      <div id="g-live" hidden>
+        <div class="g-clock" id="g-clock">2:00</div>
+        <div class="g-hits">命中 <b id="g-hits">0</b> / <span id="g-of">3</span></div>
+        <dl>
+          <dt>玩家</dt><dd id="g-who">–</dd>
+          <dt>开火</dt><dd id="g-shots">0</dd>
+          <dt>指令</dt><dd id="g-cmds">0</dd>
+          <dt>当前得分</dt><dd id="g-score">0</dd>
+        </dl>
+        <div class="g-btns">
+          <button class="primary" id="g-hit">命中 +1</button>
+          <button id="g-stop">结束</button>
+        </div>
+      </div>
+      <div class="g-last" id="g-last" hidden></div>
+      <ol class="g-board" id="g-board"></ol>
     </div>
 
     <div class="card section">
@@ -230,7 +282,9 @@ function addPhoto(e) {
 const TOOL_NAMES = {
   "self.tank.move": "移动", "self.tank.turn": "转向", "self.tank.barrel": "炮管",
   "self.tank.fire": "开火", "self.tank.stop": "停车", "self.tank.dance": "跳舞",
-  "self.get_device_status": "查询状态", "self.camera.take_photo": "拍照", "self.tank.set_persona": "切换人格",
+  "self.get_device_status": "查询状态", "self.game.start": "开始挑战", "self.game.hit": "命中", "self.game.stop": "结束挑战",
+  "self.game.status": "挑战成绩", "self.macro.save": "记住动作", "self.macro.run": "执行动作", "self.macro.list": "动作列表",
+  "self.macro.delete": "忘掉动作", "self.macro.record_start": "开始学动作", "self.macro.record_stop": "学完动作", "self.camera.take_photo": "拍照", "self.tank.set_persona": "切换人格",
 };
 
 // 平台连上后会自动查询状态，属于后台行为，不在对话里显示
@@ -291,6 +345,59 @@ function setMode(m) {
   setMic(m === "open");
 }
 
+// ---- 打靶挑战 ----
+let game = null;
+function fmtClock(ms) {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+function setGame(g) {
+  if (!g) return;
+  game = g;
+  $("g-idle").hidden = g.running;
+  $("g-live").hidden = !g.running;
+  if (g.running) {
+    $("g-hits").textContent = g.hits;
+    $("g-of").textContent = g.targets;
+    $("g-who").textContent = g.player;
+    $("g-shots").textContent = g.shots;
+    $("g-cmds").textContent = g.commands;
+    $("g-score").textContent = g.score;
+  }
+  const last = g.last;
+  $("g-last").hidden = !last || g.running;
+  if (last) {
+    $("g-last").textContent = (last.success ? "🏆 全部打中！" : last.rank ? "⏱ 时间到" : "已结束（不记分）")
+      + ` ${last.player}：命中 ${last.hits}/${last.targets}，用时 ${Math.round(last.seconds)} 秒，`
+      + `开火 ${last.shots} 次，指令 ${last.commands} 条` + (last.rank ? `，${last.score} 分，第 ${last.rank} 名` : "");
+  }
+  const board = $("g-board");
+  board.replaceChildren(...(g.board || []).map((r, i) => {
+    const li = document.createElement("li");
+    if (last && last.rank === i + 1) li.className = "me";
+    const cells = [["n", i + 1], ["p", r.player], ["d", `${r.hits}/${r.targets} · ${Math.round(r.seconds)}s`], ["s", r.score]];
+    for (const [cls, text] of cells) {
+      const span = document.createElement("span");
+      span.className = cls;
+      span.textContent = text;
+      li.appendChild(span);
+    }
+    return li;
+  }));
+}
+setInterval(() => {
+  if (!game || !game.running || !game.ends_at) return;
+  const left = game.ends_at - Date.now();
+  $("g-clock").textContent = fmtClock(left);
+  $("g-clock").classList.toggle("low", left < 15000);
+}, 200);
+$("g-start").onclick = () => send({
+  type: "game_start", player: $("g-player").value.trim(),
+  targets: Number($("g-targets").value) || 3, seconds: Number($("g-seconds").value) || 120,
+});
+$("g-hit").onclick = () => send({ type: "game_hit" });
+$("g-stop").onclick = () => send({ type: "game_stop" });
+
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
   ws.onmessage = (ev) => {
@@ -300,10 +407,12 @@ function connect() {
       e.history.forEach(render);
       setConn(e.conn);
       setStatus(e.status);
+      setGame(e.game);
       setMic(e.mic);
       if (mode === "ptt" && e.mic) send({ type: "mic", on: false });
     } else if (e.type === "conn") setConn(e.state);
     else if (e.type === "status") setStatus(e.status);
+    else if (e.type === "game") setGame(e);
     else if (e.type === "mic") setMic(e.on);
     else if (e.type === "speaking") $("speaking").hidden = !e.on;
     else render(e);

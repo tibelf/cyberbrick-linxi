@@ -214,6 +214,12 @@ async def _run(args):
     # 动作宏存在身份文件旁边（本地数据，已 gitignore）
     register_macro_tools(mcp, Macros(tank, Path(args.state).with_name(".macros.json"),
                                      say=lambda text: session.say(text)))
+    from .game import TargetChallenge
+    from .tools import register_game_tools
+
+    # 打靶挑战：网页控制台显示计分板（on_change 在网页启动后接上）
+    game = TargetChallenge(tank, Path(args.state).with_name(".leaderboard.json"), say=lambda text: session.say(text))
+    register_game_tools(mcp, game)
     photo = None
     if args.camera:
         from .camera import PhotoTool, make_camera
@@ -272,12 +278,14 @@ async def _run(args):
 
         mood = Mood(tank)
         listeners.append(lambda e: e.get("type") == "emotion" and mood.on_emotion(e.get("emotion")))
+    listeners.append(lambda e: e.get("type") == "tool" and game.on_tool(e.get("name")))  # 挑战中数指令
     if args.web:
         import webbrowser
 
         from .web import WebConsole
 
-        console = WebConsole(tank, session, port=args.web_port)
+        console = WebConsole(tank, session, port=args.web_port, game=game)
+        game.on_change = lambda snap: console.publish({"type": "game", **snap})
         listeners.append(console.publish)
         if photo:
             import base64
@@ -358,8 +366,8 @@ def cmd_marker_test(args):
             s = tracker.locate(frame, target)
             if s.car and s.target:
                 info = f"目标在车头{'左' if s.bearing > 0 else '右'} {abs(s.bearing):5.1f}°  距离 {s.distance:5.1f} cm"
-                if s.target_tilt is not None:
-                    info += f"  目标倾角 {s.target_tilt:4.0f}°"
+                if s.target_height is not None:
+                    info += f"  目标离地 {s.target_height:4.1f} cm"
                 if abs(s.bearing) > 150:
                     info += "  ←炮管正对着目标却显示 180° 左右？0 号标记贴反了"
             else:

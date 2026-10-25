@@ -95,6 +95,30 @@ CAMERA_HOWTO = {
 }
 
 
+def register_game_tools(mcp: McpServer, game) -> None:
+    """game 是 game.TargetChallenge：打靶挑战。"""
+    mcp.add_tool(
+        "self.game.start",
+        "开始打靶挑战：地上摆好目标，玩家用语音指挥小车在限时内全部打倒，指令越少分越高。"
+        "用户说“开始打靶挑战/我们来比赛打靶/3 个目标限时两分钟”时调用，把返回的开场白念给用户。"
+        "用户说了名字（“我是小明”）就填 player。挑战中照常执行用户的移动和开火指令，不要替用户决定开火。",
+        [Prop("targets", "integer", "目标个数", default=3, minimum=1, maximum=10),
+         Prop("seconds", "integer", "限时（秒）", default=120, minimum=20, maximum=600),
+         Prop("player", "string", "玩家名字", default="")],
+        game.start,
+    )
+    mcp.add_tool(
+        "self.game.hit",
+        "记一次命中。挑战中用户说“打中了/倒了/又倒一个/打中两个”时调用（打中几个填 count）。"
+        "只有用户自己说打中了才调用，不要猜。把返回结果念给用户，全部打中时会给出总分和排名。",
+        [Prop("count", "integer", "这次打中几个", default=1, minimum=1, maximum=10)],
+        game.hit,
+    )
+    mcp.add_tool("self.game.stop", "提前结束打靶挑战（不记分）。用户说“不玩了/结束挑战”时调用。", [], game.stop)
+    mcp.add_tool("self.game.status", "打靶挑战的当前成绩：命中、剩余时间、开火次数、指令数、得分，没在挑战时给出最高分。"
+                 "用户问“还剩多久/几分了/最高分多少”时调用。", [], game.status)
+
+
 def register_macro_tools(mcp: McpServer, macros) -> None:
     """macros 是 macros.Macros：语音编程，把一串动作起个名字记下来，以后一句话执行。"""
     mcp.add_tool(
