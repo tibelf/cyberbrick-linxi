@@ -54,7 +54,7 @@ python -m linx_client list-audio
 
 1. **灵矽平台（听和想）**：ASR → LLM（Function Call）→ TTS。把「前进两秒再开火」拆成多次 MCP `tools/call`。智控台必须把意图识别设为 Function Call，角色提示词在 `prompts/agent-prompt.md`。
 2. **linx-client（排程和安全）**
-   - `session.py`：WebSocket 会话。握手头必须带 `Authorization: Bearer`、`Device-Id`、`Client-Id`、`Protocol-Version`（所以客户端只能是本地程序，不能是网页）。上行 PCM 16k/20ms，下行格式以服务端 hello 为准（可能是 opus，需 opuslib）。默认半双工：TTS 播报期间丢弃麦克风帧。断线指数退避重连；收到 `config_updated` 通知会主动断开重连。
+   - `session.py`：WebSocket 会话。握手头必须带 `Authorization: Bearer`、`Device-Id`、`Client-Id`、`Protocol-Version`（所以客户端只能是本地程序，不能是网页）。上行 PCM 16k/20ms，下行格式以服务端 hello 为准（可能是 opus，需 opuslib）。默认半双工：TTS 播报期间丢弃麦克风帧（声卡余音约 0.4s 也算播报中）。`--duplex` 全双工：播报期间只上传静音，`echo.py` 的 `BargeInDetector` 按「麦克风音量 / 播放音量」估回声增益，明显超过回声才算插话，打断后补传那几帧原声。断线指数退避重连；收到 `config_updated` 通知会主动断开重连。
    - `mcp.py`：设备端 MCP 服务（平台是客户端），消息封装为 `{"type":"mcp","payload":<JSON-RPC>}`。参数只用 integer/string/boolean；`Prop.coerce` 会把整数裁剪到 min/max。工具异常一律转成 `isError` 结果返回，绝不让连接断掉。
    - `tools.py`：工具名、描述、参数 schema。**描述文字直接决定大模型何时调用**（如 fire 只在用户明确要求时调用）。
    - `tank/executor.py`：动作队列。工具调用**立即返回「已安排」**，动作在后台 worker 中顺序执行，因此多次调用会自然串成序列。`stop()` 不进队列：清空队列、取消当前动作、halt。

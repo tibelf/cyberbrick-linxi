@@ -3,26 +3,20 @@
 协议见 Xrobot-docs/docs/xrobot/platform/websocket.md。
 """
 
-import array
 import asyncio
 import json
-import math
+from collections import deque
 from typing import Callable
 
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, WebSocketException
 
 from .audio import IN_FRAME_MS, IN_RATE
+from .echo import PREROLL_FRAMES, BargeInDetector, rms
 from .identity import Identity
 from .mcp import McpServer
 
 Endpoint = tuple[str, str]  # (ws_url, token)
-BARGE_IN_FRAMES = 6  # 连续 6 帧（120ms）够响才算插话，避免咳嗽、碰桌子误触发
-
-
-def _rms(frame: bytes) -> float:
-    samples = array.array("h", frame)
-    return math.sqrt(sum(s * s for s in samples) / len(samples)) if samples else 0.0
 
 
 class LinxSession:
@@ -49,9 +43,11 @@ class LinxSession:
         self.speaker_device = speaker_device
         self.on_event = on_event  # 网页控制台等订阅者：收到 {"type": ...} 事件
         self.mic_enabled = True  # 网页「按住说话」用：关闭时不上传麦克风
-        self.barge_in_level = barge_in_level  # 全双工下说话打断的音量阈值（int16 RMS），0 = 关闭
+        self.barge_in_level = barge_in_level  # 全双工下插话的最低音量（int16 RMS），0 = 不检测、原样上传
+        self._barge = BargeInDetector(barge_in_level)
+        self._preroll: deque[bytes] = deque(maxlen=PREROLL_FRAMES)
         self._drop_tts = False  # 打断后丢弃本轮回复残余的音频，直到下一轮开始
-        self._loud_frames = 0
+        self._barged = False  # 已打断：用户正在说话，麦克风原样上传，直到下一轮回复开始
         self.session_id: str | None = None
         self.speaking = False
         self.ws: ClientConnection | None = None
@@ -91,7 +87,7 @@ class LinxSession:
         """打断小车说话：通知平台中止本轮回复，本地立即静音。小车没在说话时什么也不做。"""
         if not self.speaking and not (self._speaker and self._speaker.busy()):
             return False
-        self._drop_tts = True
+        self._drop_tts = self._barged = True
         if self._speaker:
             self._speaker.flush()
         self.speaking = False
@@ -154,7 +150,7 @@ class LinxSession:
                     t.cancel()
                 self._stop_audio()
                 self.ws = None
-                self.speaking = self._drop_tts = False  # 断线时回复也就结束了，否则半双工下麦克风会一直被挡住
+                self.speaking = self._drop_tts = self._barged = False  # 断线时回复也就结束了，否则半双工下麦克风会一直被挡住
                 self._emit(type="conn", state="disconnected")
 
     async def _wait_hello(self, ws) -> dict:
@@ -202,16 +198,29 @@ class LinxSession:
                 continue
             if not self.mic_enabled:
                 frame = bytes(len(frame))  # 发静音而不是停发，平台的语音检测才能判断一句话说完了
-            talking = self.speaking or self._speaker.busy()
-            if not self.duplex and talking:
+            # meter.level() > 0：最后一段刚写进声卡、还在外放（约 0.4 秒余音），也算在说话
+            talking = self.speaking or self._speaker.busy() or self._speaker.meter.level() > 0
+            if not talking or self._barged:
+                self._barge.reset()
+                self._preroll.clear()
+            elif not self.duplex:
                 continue  # 半双工：播报时不上传，避免小车把自己的声音当成指令
-            if talking and self.barge_in_level:
-                # 全双工（需戴耳机）：小车说话时检测到人声就打断
-                self._loud_frames = self._loud_frames + 1 if _rms(frame) > self.barge_in_level else 0
-                if self._loud_frames >= BARGE_IN_FRAMES:
-                    self._loud_frames = 0
-                    await self.abort()
+            elif self.barge_in_level:
+                frame = await self._duplex_frame(frame)
             await self.ws.send(frame)
+
+    async def _duplex_frame(self, frame: bytes) -> bytes:
+        """全双工、小车正在说话：原声先扣下（传静音），平台就听不到外放的回声；
+        本地确认有人插话（比预期回声响得多）才打断小车，并补传缓存的原声。返回这一帧该上传的内容。"""
+        self._preroll.append(frame)
+        if not self._barge.feed(rms(frame), self._speaker.meter.level()):
+            return bytes(len(frame))
+        await self.abort()
+        held = list(self._preroll)
+        self._preroll.clear()
+        for f in held[:-1]:
+            await self.ws.send(f)
+        return held[-1]
 
     async def _recv_loop(self, ws):
         async for raw in ws:
@@ -240,7 +249,7 @@ class LinxSession:
         elif t == "tts":
             state = msg.get("state")
             if state == "start":
-                self._drop_tts = False
+                self._drop_tts = self._barged = False
                 self.speaking = True
                 self._emit(type="speaking", on=True)
             elif state == "sentence_start":

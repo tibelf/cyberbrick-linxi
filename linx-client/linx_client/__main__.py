@@ -283,9 +283,9 @@ def main():
     _add_tank_args(p_run)
     p_run.add_argument("--no-audio", action="store_true", help="不开麦克风/扬声器（只联调工具调用）")
     p_run.add_argument("--mode", default="realtime", choices=["realtime", "auto", "manual"])
-    p_run.add_argument("--duplex", action="store_true", help="全双工：小车说话时也能说话打断它（必须戴耳机，否则会自我打断）")
+    p_run.add_argument("--duplex", action="store_true", help="全双工：小车说话时也能说话打断它（外放也可以：会自动扣掉自己的回声，戴耳机最稳）")
     p_run.add_argument("--barge-in-level", type=int, default=2000,
-                       help="全双工下判定为插话的音量阈值（16 位采样 RMS，越小越灵敏，0 = 只上传不自动打断）")
+                       help="全双工下插话的最低音量（16 位采样 RMS，越小越灵敏）；0 = 不做回声判断、麦克风原样上传（只适合戴耳机）")
     p_run.add_argument("--mic", help="麦克风设备名或序号（见 list-audio）")
     p_run.add_argument("--speaker", help="扬声器设备名或序号")
     p_run.add_argument("--ws-url", help="覆盖 WebSocket 地址")
