@@ -320,7 +320,7 @@ def _marker_labels(args):
 def cmd_marker_test(args):
     """实时打印“目标在车头左/右几度、多远”，每秒存一张标注图，用来检查标记贴得对不对。"""
     from .camera import _encode, make_camera
-    from .marker import resolve_target
+    from .marker import CAR_ID, detection_report, resolve_target
 
     cam, tracker = make_camera(args.camera), _make_tracker(args)
     target = resolve_target(args.target, _marker_labels(args))
@@ -336,7 +336,9 @@ def cmd_marker_test(args):
                     info += f"  目标倾角 {s.target_tilt:4.0f}°"
             else:
                 info = "看不到车顶 0 号标记" if not s.car else "看到车了，看不到目标"
-            print("\r" + info.ljust(60), end="", flush=True)
+            want = (CAR_ID,) + ((target.marker_id,) if target.marker_id else ())
+            info += f"  [{frame.shape[1]}×{frame.shape[0]} · {detection_report(s.corners or {}, want)}]"
+            print("\r" + info.ljust(90), end="", flush=True)
             if time.monotonic() - last > 1:
                 last = time.monotonic()
                 with open(args.out, "wb") as f:

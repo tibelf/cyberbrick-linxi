@@ -102,6 +102,7 @@ class MarkerTracker:
         dictionary = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, DICT_NAME))
         params = cv2.aruco.DetectorParameters()
         params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+        params.minMarkerPerimeterRate = 0.01  # 默认 0.03（相对画面宽）：1080p 下边长小于约 14px 的标记会被直接丢掉
         self.detector = cv2.aruco.ArucoDetector(dictionary, params)
         h = marker_cm / 2  # 角点顺序与检测结果一致：左上、右上、右下、左下（标记的“上”= 车头）
         self.obj = np.array([[-h, h, 0], [h, h, 0], [h, -h, 0], [-h, -h, 0]], np.float32)
@@ -223,6 +224,22 @@ class MarkerTracker:
             text = "no car marker" if not s.car else "no target"
         cv2.putText(img, text, (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
         return img
+
+
+def detection_report(found: dict, want: tuple = (CAR_ID,)) -> str:
+    """“0号 38px · 1号 看不到”：每个标记在画面里的边长（像素），边长小于约 20px 时很容易认不出。"""
+    import numpy as np
+
+    ids = sorted(set(want) | set(found))
+    parts = []
+    for i in ids:
+        if i in found:
+            c = found[i]
+            side = np.mean([np.linalg.norm(c[k] - c[(k + 1) % 4]) for k in range(4)])
+            parts.append(f"{i}号 {side:.0f}px")
+        else:
+            parts.append(f"{i}号 看不到")
+    return " · ".join(parts)
 
 
 def marker_svg(size_cm: float = MARKER_CM, target_ids=(1, 2, 3)) -> str:

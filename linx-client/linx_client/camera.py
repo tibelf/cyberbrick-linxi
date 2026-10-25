@@ -74,6 +74,12 @@ class OpenCVCamera:
             cap = cv2.VideoCapture(self.index)
             if not cap.isOpened():
                 raise RuntimeError(f"打不开摄像头 {self.index}（macOS 需在「隐私与安全性 → 摄像头」里允许终端）")
+            # 默认常常只给 640×480：车顶标记斜着拍时只剩十几个像素，解不出来（2026-10-25 用户实测
+            # “要么看不到 0 号、要么看不到 1 号”）。要最高 1080p，拿到多少用多少；上传视觉模型前会再缩小
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+            w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            print(f"📷 摄像头 {self.index}：{w}×{h}" + ("（分辨率偏低，标记要拍近一点）" if w < 1280 else ""))
             self._cap = cap
             threading.Thread(target=self._reader, daemon=True).start()
         t0 = time.monotonic()

@@ -8,7 +8,8 @@ pytest.importorskip("cv2")
 
 from marker_sim import SimBackend, SimCamera, World  # noqa: E402
 
-from linx_client.marker import MarkerTracker, Target, marker_svg, parse_labels, resolve_target  # noqa: E402
+from linx_client.marker import (MarkerTracker, Target, detection_report, marker_svg, parse_labels,  # noqa: E402
+                                resolve_target)
 from linx_client.marker_seek import ARRIVE_CM, MarkerSeeker  # noqa: E402
 from linx_client.tank import MockBackend, TankExecutor  # noqa: E402
 
@@ -32,6 +33,20 @@ def test_wrong_focal_guess_keeps_direction():
     w = World(cam=(-40, -60, 70), car=(0, 0, 0.3), focal_ratio=0.95)
     s = MarkerTracker().locate(w.render(), Target("marker", marker_id=1))
     assert abs(s.bearing - w.bearing()) < 8
+
+
+def test_low_far_camera_needs_hd(monkeypatch):
+    """2026-10-25 用户实测“要么看不到 0 号、要么看不到 1 号”：640×480 下车顶标记斜着拍只剩十几像素。
+    同一个机位换成 1080p 两个都认得出——所以 OpenCVCamera 要最高 1080p。"""
+    import marker_sim
+
+    cam = (-80, -160, 30)
+    found_low = MarkerTracker().detect(World(cam=cam, car=(0, 0, 0.3)).render())
+    monkeypatch.setattr(marker_sim, "W", 1920)
+    monkeypatch.setattr(marker_sim, "H", 1080)
+    found_hd = MarkerTracker().detect(World(cam=cam, car=(0, 0, 0.3)).render())
+    assert 0 not in found_low and {0, 1} <= set(found_hd)
+    assert "0号 看不到" in detection_report(found_low, (0, 1)) and "px" in detection_report(found_hd, (0, 1))
 
 
 def test_no_car_marker():
