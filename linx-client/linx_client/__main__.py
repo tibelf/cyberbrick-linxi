@@ -151,6 +151,24 @@ def cmd_activate(args):
         print("✅ 绑定完成")
 
 
+ERROR_SAY_GAP_S = 20  # 车出问题时语音提醒的最小间隔，车关着时不至于一直念
+
+
+def _report_tank_errors(tank: TankExecutor, session: LinxSession, publish=None):
+    """动作在后台失败时，工具早就回了“已安排”，大模型并不知道。这里主动告诉用户：网页上显示，语音念一句。"""
+    last_say = [0.0]
+
+    def on_error(message: str):
+        if publish:
+            publish({"type": "error", "text": message})
+        now = time.monotonic()
+        if session.ws is not None and now - last_say[0] >= ERROR_SAY_GAP_S:
+            last_say[0] = now
+            asyncio.create_task(session.say(message))
+
+    tank.on_error = on_error
+
+
 def _start_console(loop: asyncio.AbstractEventLoop, tank: TankExecutor, session: LinxSession, done: asyncio.Event):
     """键盘：回车/s = 急停（同时打断说话）；a = 打断说话；t <文字> = 发文本调试；q = 退出。"""
 
@@ -239,6 +257,7 @@ async def _run(args):
         print(f"🌐 网页控制台：{console.url}")
         webbrowser.open(console.url)
     session.on_event = lambda e: [listen(e) for listen in listeners]
+    _report_tank_errors(tank, session, console.publish if args.web else None)
     done = asyncio.Event()
     _start_console(asyncio.get_running_loop(), tank, session, done)
     runner = asyncio.create_task(session.run_forever())

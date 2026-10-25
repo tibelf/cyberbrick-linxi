@@ -8,6 +8,7 @@
 /wifi.json 格式：{"networks": [{"ssid": ..., "password": ...}, ...], "admin_password": "8-9 位"}
 协议：每个 UDP 包一条 ASCII 指令，回一条应答。
   ping                  -> pong
+  stat                  -> stat up=<开机秒数> mem=<空闲内存>（主机据此发现车中途重启过）
   drive <l> <r> <ms>    l/r: -100..100，正数前进
   turret <sp> <ms>      sp: -100..100，0 为停
   fire <ms>             扣扳机，ms 后看门狗回位
@@ -67,6 +68,9 @@ def handle(line):
     try:
         if cmd == 'ping':
             return 'pong'
+        if cmd == 'stat':
+            import gc
+            return 'stat up=%d mem=%d' % (time.ticks_ms() // 1000, gc.mem_free())
         if cmd == 'halt':
             halt()
             return 'ok'

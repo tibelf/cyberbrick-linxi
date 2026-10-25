@@ -64,11 +64,18 @@ def register_tank_tools(mcp: McpServer, tank: TankExecutor) -> None:
         [],
         tank.dance,
     )
+    async def device_status():
+        await tank.check()  # 真的问一下车，不只是读本地记录
+        return json.dumps(tank.status(), ensure_ascii=False)
+
     mcp.add_tool(
         "self.get_device_status",
-        "获取小车当前状态：正在执行的动作、排队动作、速度上限、已发射数量。",
+        "检查小车：会真的给车发消息确认它在不在线（link.online、延迟、是否刚重启过 rebooted），"
+        "并返回最近一次动作失败的原因（last_error）、正在执行的动作和任务、排队动作、速度上限、已发射数量。"
+        "用户说“车没反应/车怎么不动/检查一下车/车还在吗”时调用，然后用一句话告诉用户结果："
+        "不在线就提醒检查车的电源、电量和网络；刚重启过多半是电量低；有 last_error 就照实说出来。",
         [],
-        lambda: json.dumps(tank.status(), ensure_ascii=False),
+        device_status,
     )
 
 

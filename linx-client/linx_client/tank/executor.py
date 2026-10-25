@@ -15,6 +15,8 @@ MAX_BARREL_MS = 1500  # 俯仰有机械限位，转太久会顶住舵机
 # 炮管俯仰是 SERVO1 上的连续旋转舵机（原厂右肩摇杆上下控制），速度 45 与原厂一致；
 # 正负号决定哪边是“抬高”，2026-10-24 实车发现装反过一次，以实测为准
 BARREL_UP_SPEED = 45
+HEARTBEAT_S = 5  # 空闲时每隔这么久问一下车还在不在（网页控制台显示在线状态、及时发现车重启）
+CHECK_TIMEOUT_S = 3
 GRANDPA_SPEED = 65  # 老爷爷模式的速度上限；再低落地就带不动履带（40% 实测带不动）
 
 # 人格只改变前进/后退的风格；转向按满速校准过角度，不受人格影响
@@ -61,16 +63,24 @@ class TankExecutor:
         self.motion_epoch = 0  # 每开始一个“不是纯前进”的动作就加 1
         self.idle_epoch = 0  # 每次队列做空、车停下就加 1
         self.turn_total = 0.0  # 累计转过的角度（正数左转），用来推算车头方向
+        # 车没反应时的排查依据：工具调用早就回了“已安排”，动作在后台失败时大模型和用户都看不到
+        self.last_error: dict | None = None  # {"time", "message"}
+        self.link: dict | None = None  # 最近一次和车通信的结果（心跳或 check() 更新）
+        self.on_error: Callable[[str], None] | None = None  # 出问题时通知（网页控制台、语音播报）
+        self._heartbeat: asyncio.Task | None = None
 
     # ---- 生命周期 ----
     async def start(self):
         await self.backend.connect()
         self._worker = asyncio.create_task(self._run())
+        if hasattr(self.backend, "ping"):
+            self._heartbeat = asyncio.create_task(self._heartbeat_loop())
 
     async def close(self):
         await self.stop()
-        if self._worker:
-            self._worker.cancel()
+        for task in (self._worker, self._heartbeat):
+            if task:
+                task.cancel()
         await self.backend.close()
 
     async def _run(self):
@@ -89,13 +99,45 @@ class TankExecutor:
                     if not self._current.cancelled():
                         raise  # worker 自己被取消
                 except Exception as e:  # noqa: BLE001
-                    print(f"[tank] 动作失败 {action.desc}: {e}")
+                    self._report(f"「{action.desc}」没执行成功：{e}")
                     await self._safe_halt()
                 finally:
                     self._current = None
                     self._current_desc = None
             self.idle_epoch += 1
             self._wakeup.clear()
+
+    def _report(self, message: str):
+        self.last_error = {"time": time.strftime("%H:%M:%S"), "message": message}
+        print(f"⚠️  [tank] {message}")
+        if self.on_error:
+            try:
+                self.on_error(message)
+            except Exception as e:  # noqa: BLE001 — 通知失败不能影响控车
+                print(f"[tank] 通知失败：{e!r}")
+
+    async def check(self) -> dict:
+        """真的给车发一条消息，看它在不在、延迟多少、是不是刚重启过。"""
+        ping = getattr(self.backend, "ping", None)
+        if ping is None:
+            return {"online": None, "detail": "这个后端不支持检查连接"}
+        try:
+            info = await asyncio.wait_for(ping(), CHECK_TIMEOUT_S)
+        except Exception as e:  # noqa: BLE001
+            info = {"online": False, "error": str(e) or type(e).__name__}
+        was_online = self.link is None or self.link.get("online") is not False
+        self.link = {**info, "checked_at": time.strftime("%H:%M:%S")}
+        if info.get("online") is False and was_online:
+            self._report(f"车没有应答（{info['error']}）：确认车开着、电量够、和电脑在同一个网络")
+        if info.get("rebooted"):
+            self._report("车刚刚自己重启过，可能是电量低或电机启动时电压被拉低，之前的动作可能没做完")
+        return self.link
+
+    async def _heartbeat_loop(self):
+        while True:
+            await asyncio.sleep(HEARTBEAT_S)
+            if not self.busy:  # 动作执行时每条指令本身就是检查，不用额外打扰
+                await self.check()
 
     # ---- 对外接口（MCP 工具调用这些） ----
     def _enqueue(self, action: Action) -> str:
@@ -255,6 +297,8 @@ class TankExecutor:
             "fire_enabled": self.fire_enabled,
             "shots_fired": self.shots_fired,
             "persona": PERSONAS[self.persona],
+            "link": self.link,
+            "last_error": self.last_error,
         }
 
     # ---- 内部 ----

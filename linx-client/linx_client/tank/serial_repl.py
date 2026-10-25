@@ -174,6 +174,14 @@ class SerialBackend:
     async def halt(self):
         await self._exec("halt()")
 
+    async def ping(self) -> dict:
+        t0 = time.monotonic()
+        out = await self._exec("print('pong')")
+        if "pong" not in out:
+            raise RuntimeError(f"串口应答不对：{out!r}")
+        return {"online": True, "link": f"USB {self.port_name or ''}".strip(),
+                "latency_ms": round((time.monotonic() - t0) * 1000)}
+
     async def led(self, r, g, b):
         await self._exec(f"led({int(r)},{int(g)},{int(b)})")
 

@@ -27,6 +27,9 @@ class TankBackend(Protocol):
 
     async def close(self) -> None: ...
 
+    # 可选：async def ping(self) -> dict —— 真的问一下车，返回 {"online": True, "link": ..., "latency_ms": ...,
+    # "rebooted": 是否刚重启过}；车不应答就抛异常。executor.check() 和心跳会用到
+
 
 class MockBackend:
     """不接硬件，只打印并记录调用，用于联调灵矽和单元测试。"""
@@ -57,6 +60,9 @@ class MockBackend:
 
     async def led(self, r, g, b):
         self._log("led", r, g, b)
+
+    async def ping(self) -> dict:
+        return {"online": True, "link": "mock（没接车）"}  # 不记进 calls，免得干扰测试
 
     async def close(self):
         self._log("close")

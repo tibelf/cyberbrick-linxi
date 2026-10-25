@@ -178,6 +178,7 @@
     <div class="card section">
       <h2>小车状态</h2>
       <dl>
+        <dt>车</dt><dd id="s-link">–</dd>
         <dt>当前动作</dt><dd id="s-current">空闲</dd>
         <dt>排队</dt><dd id="s-queued">0</dd>
         <dt>速度上限</dt><dd id="s-speed">–</dd>
@@ -264,6 +265,11 @@ const PERSONA_KEYS = { "正常": "normal", "特种兵": "soldier", "老爷爷": 
 function setStatus(s) {
   const p = PERSONA_KEYS[s.persona];
   document.querySelectorAll("#persona button").forEach((b) => b.classList.toggle("on", b.dataset.persona === p));
+  const l = s.link, el = $("s-link");
+  el.textContent = !l ? "–" : l.online === false ? "没有应答" : l.online
+    ? `在线 · ${l.latency_ms ?? "?"}ms` + (l.uptime_s != null ? ` · 开机 ${Math.round(l.uptime_s / 60)} 分钟` : "") : "未知";
+  el.style.color = l && l.online === false ? "var(--bad)" : "";
+  el.title = l ? `${l.link || l.error || ""}（${l.checked_at || ""} 检查）` : "";
   $("s-current").textContent = s.current || "空闲";
   $("s-queued").textContent = s.queued.length ? s.queued.join("、") : "0";
   $("s-speed").textContent = s.max_speed + "%";

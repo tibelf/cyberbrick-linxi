@@ -6,11 +6,14 @@
 
 import asyncio
 import os
+import re
 import socket
 import threading
+import time
 from pathlib import Path
 
 PORT = 4210
+REDISCOVER_GAP_S = 10  # 车没应答时重新找车（DHCP 换了 IP、车重启）的最小间隔
 
 
 def _lan_ip() -> str:
@@ -75,6 +78,8 @@ class UdpBackend:
         self.retries = retries
         self._sock: socket.socket | None = None
         self._lock = threading.Lock()
+        self._last_discover = 0.0
+        self._uptime: int | None = None  # 上次 stat 读到的车开机时长，变小了说明车重启过
 
     async def connect(self):
         await asyncio.to_thread(self._connect_sync)
@@ -91,17 +96,56 @@ class UdpBackend:
 
     def _send_sync(self, line: str) -> str:
         with self._lock:
-            for _ in range(self.retries):
-                self._sock.sendto(line.encode(), (self.host, self.port))
-                try:
-                    data, _ = self._sock.recvfrom(128)
-                except socket.timeout:
-                    continue
-                reply = data.decode("utf-8", "replace")
-                if reply.startswith("err"):
-                    raise RuntimeError(f"车拒绝指令 {line!r}：{reply}")
-                return reply
-        raise TimeoutError(f"车没有应答：{line!r}")
+            reply = self._try_send(line)
+            if reply is None and self._rediscover():
+                reply = self._try_send(line)
+        if reply is None:
+            raise TimeoutError(f"车（{self.host}）没有应答：{line!r}")
+        if reply.startswith("err"):
+            raise RuntimeError(f"车拒绝指令 {line!r}：{reply}")
+        return reply
+
+    def _try_send(self, line: str) -> str | None:
+        for _ in range(self.retries):
+            self._sock.sendto(line.encode(), (self.host, self.port))
+            try:
+                data, addr = self._sock.recvfrom(128)
+            except socket.timeout:
+                continue
+            if addr[0] == self.host:
+                return data.decode("utf-8", "replace")
+        return None
+
+    def _rediscover(self) -> bool:
+        """车没应答：可能是重启后 DHCP 换了 IP，重新找一次（限频，车关着时不会每条指令都扫网段）。"""
+        if time.monotonic() - self._last_discover < REDISCOVER_GAP_S:
+            return False
+        self._last_discover = time.monotonic()
+        host = discover(self.port)
+        if not host:
+            return False
+        if host != self.host:
+            print(f"[udp-tank] 车的 IP 变了：{self.host} → {host}")
+            self.host = host
+        return True
+
+    async def ping(self) -> dict:
+        return await asyncio.to_thread(self._ping_sync)
+
+    def _ping_sync(self) -> dict:
+        t0 = time.monotonic()
+        try:
+            reply = self._send_sync("stat")
+        except RuntimeError:  # 车上还是旧版程序，不认识 stat
+            reply = self._send_sync("ping")
+        info = {"online": True, "link": f"Wi-Fi {self.host}", "latency_ms": round((time.monotonic() - t0) * 1000)}
+        m = re.search(r"up=(\d+)", reply)
+        if m:
+            up = int(m.group(1))
+            info["uptime_s"] = up
+            info["rebooted"] = self._uptime is not None and up < self._uptime
+            self._uptime = up
+        return info
 
     async def _send(self, line: str):
         return await asyncio.to_thread(self._send_sync, line)
