@@ -53,6 +53,7 @@ class World:
         self.until = 0.0
         self.last = time.monotonic()
         self.follow = True  # 手持：镜头跟着车和目标的中点
+        self.marker_reversed = False  # 车顶标记贴反了（箭头朝车尾）
 
     # ---- 运动 ----
     def set_drive(self, left, right, ms):
@@ -140,6 +141,8 @@ class World:
         # 车顶标记：箭头（标记的“上”）朝车头
         f = np.array([math.cos(self.theta), math.sin(self.theta), 0.0])
         r = np.array([math.sin(self.theta), -math.cos(self.theta), 0.0])
+        if self.marker_reversed:
+            f, r = -f, -r
         src, pad = marker_img(0)
         half = MARKER_CM / 2 * src.shape[0] / (src.shape[0] - 2 * pad)
         self._paste(img, cv2.cvtColor(src, cv2.COLOR_GRAY2BGR), self._quad((self.x, self.y, CAR_HEIGHT_CM), r, f, half), R, t)

@@ -84,6 +84,8 @@ def test_marker_svg_has_exact_size():
 
 async def _run(world, goal="approach", target="绿色瓶子", labels=None, **kw):
     tank = TankExecutor(SimBackend(world), max_speed=100)
+    world.warnings = []
+    tank.on_error = world.warnings.append
     await tank.start()
     said = []
 
@@ -106,6 +108,7 @@ def test_drives_to_target_with_handheld_camera(shake):
     said = asyncio.run(_run(world, time_limit_s=20))
     assert said and said[0].startswith("已走到绿色瓶子"), said
     assert world.dist() < ARRIVE_CM + 6
+    assert not any("贴反" in w for w in world.warnings)  # 标记贴对了就不能误判成贴反
 
 
 def test_drives_to_color_target():
@@ -120,6 +123,16 @@ def test_color_target_right_next_to_car_still_seen():
     w = World(car=(0, 0, 0.0), target=(13, 0), target_kind="color", cam=(-40, -60, 70))
     s = MarkerTracker().locate(w.render(), Target("color", color="绿"))
     assert s.target and abs(s.distance - 13) < 3
+
+
+def test_reversed_car_marker_is_detected_and_corrected():
+    """车顶标记贴反了：一开始会往反方向开，发现越开越远后自动反过来算，最后照样撞到/走到。"""
+    world = World(car=(0, 0, 0.3), target=(60, 30), cam=(-40, -60, 70))
+    world.marker_reversed = True
+    said = asyncio.run(_run(world, time_limit_s=25))
+    assert any("贴反" in w for w in world.warnings)
+    assert said[0].startswith("已走到绿色瓶子"), said
+    assert world.dist() < ARRIVE_CM + 6
 
 
 def test_aim_turns_in_place():

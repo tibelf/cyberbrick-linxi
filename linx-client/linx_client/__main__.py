@@ -334,6 +334,8 @@ def cmd_marker_test(args):
                 info = f"目标在车头{'左' if s.bearing > 0 else '右'} {abs(s.bearing):5.1f}°  距离 {s.distance:5.1f} cm"
                 if s.target_tilt is not None:
                     info += f"  目标倾角 {s.target_tilt:4.0f}°"
+                if abs(s.bearing) > 150:
+                    info += "  ←炮管正对着目标却显示 180° 左右？0 号标记贴反了"
             else:
                 info = "看不到车顶 0 号标记" if not s.car else "看到车了，看不到目标"
             want = (CAR_ID,) + ((target.marker_id,) if target.marker_id else ())

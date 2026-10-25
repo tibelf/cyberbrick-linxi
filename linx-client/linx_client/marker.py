@@ -99,6 +99,7 @@ class MarkerTracker:
         self.marker_cm = marker_cm
         self.car_height_cm = car_height_cm
         self.focal_ratio = focal_ratio
+        self.flip = False  # 车顶标记贴反了（箭头朝车尾）：闭环任务发现“往前开却越开越远”时会把它设为 True
         dictionary = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, DICT_NAME))
         params = cv2.aruco.DetectorParameters()
         params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
@@ -201,6 +202,8 @@ class MarkerTracker:
                     n = R.T @ Rt[:, 2]  # 目标标记的法线，在车身坐标系里
                     s.target_tilt = math.degrees(math.asin(min(1.0, abs(float(n[2])))))
                     s.target_id = mid
+        if xy is not None and self.flip:
+            xy = -xy[0], -xy[1]  # 车头其实是标记的 -y 方向
         if xy is not None:
             s.target = True
             s.bearing = math.degrees(math.atan2(-xy[0], xy[1]))

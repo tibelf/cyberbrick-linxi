@@ -5,6 +5,7 @@
 - 偏得少：两条履带差速，一边往前开一边把车头掰正；离得近了减速
 - 走到（< ARRIVE_CM）就停；hit 时靠近后全速撞上去，再看目标倒了没有
 - 看不到车或目标：立刻停车等，LOST_S 秒还看不到就放弃并说明原因
+- 往前开却越开越远：车顶标记贴反了，自动把车头方向反过来算并提醒（2026-10-25 用户实测“去撞目标却往反方向跑”）
 车顶没贴标记、目标既没有标记也说不出颜色时，退回视觉模型版（fallback）。
 所有动作走 TankExecutor：steer 每条只管 0.4 秒（画面卡住车就自己停），速度裁剪到限速，stop() 随时取消。
 """
@@ -33,6 +34,9 @@ NO_MARKER_FALLBACK_S = 2.0  # 一开始这么久都看不到车顶标记，就�
 TIME_LIMIT_S = 120.0
 PUBLISH_S = 1.0  # 网页控制台每秒刷新一张调试图
 KNOCKED_TILT_DEG = 40.0
+# 往前开着（偏角不大）却越开越远：车顶标记贴反了（箭头朝车尾），程序以为的车头其实是车尾
+REVERSE_CHECK_S = 0.3  # 至少隔这么久的两次观测
+REVERSE_CM = 6.0  # 距离变大超过 max(这么多, 10%) 才算（手持时距离会有几厘米的抖动）
 
 Say = Callable[[str], Awaitable[None]]
 
@@ -134,6 +138,7 @@ class MarkerSeeker:
         lost_since = None
         seen_car = False
         rams = 0
+        fwd_since = fwd_d0 = None  # 这一段连续往前开从什么时候、多远开始
         try:
             while True:
                 now = time.monotonic()
@@ -142,6 +147,7 @@ class MarkerSeeker:
                 s = await self._look(spec)
                 seen_car = seen_car or s.car
                 if not (s.car and s.target):
+                    fwd_since = None
                     await self.tank.halt_now()  # 看不到就别闭着眼开
                     if self.fallback and not seen_car and now - t0 > NO_MARKER_FALLBACK_S:
                         return None
@@ -182,7 +188,19 @@ class MarkerSeeker:
                         return False, f"撞了 {rams} 次，{target}还没倒"
                     continue
                 if abs(b) > PIVOT_DEG:
+                    fwd_since = None
                     await self._turn(b)
+                    continue
+                if fwd_since is None or d < fwd_d0 - 2:
+                    fwd_since, fwd_d0 = now, d  # 刚开始往前开，或者确实在靠近
+                elif now - fwd_since >= REVERSE_CHECK_S and d > fwd_d0 + max(REVERSE_CM, 0.1 * fwd_d0):
+                    self.tracker.flip = not self.tracker.flip
+                    msg = "车顶标记好像贴反了（箭头要朝车头），已经自动按反的算；有空把标记转过来重新贴"
+                    print(f"⚠️  {msg}")
+                    if self.tank.on_error:
+                        self.tank.on_error(msg)
+                    fwd_since = None
+                    await self.tank.halt_now()
                     continue
                 base = FAR_SPEED if d > NEAR_CM else NEAR_SPEED
                 diff = max(-MAX_DIFF, min(MAX_DIFF, STEER_GAIN * b))  # 目标在左（b>0）→ 右履带快
