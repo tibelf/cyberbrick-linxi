@@ -17,6 +17,8 @@ MAX_BARREL_MS = 1500  # 俯仰有机械限位，转太久会顶住舵机
 BARREL_UP_SPEED = 45
 STEER_MS = 400  # steer 一条指令管多久（含看门狗余量）：任务每 0.1s 刷新，卡住 0.4s 车就自己停
 STEER_MAX_MS = 600
+MANUAL_MS = 400  # 手机手柄一条指令管多久：手柄每 0.1s 刷新，手机断线/锁屏 0.4s 内车自己停
+MANUAL_HOLD_S = 0.6  # 最近一次手柄指令后这么久内算“正在手动”，情绪小动作不插进来
 HEARTBEAT_S = 5  # 空闲时每隔这么久问一下车还在不在（网页控制台显示在线状态、及时发现车重启）
 CHECK_TIMEOUT_S = 3
 GRANDPA_SPEED = 65  # 老爷爷模式的速度上限；再低落地就带不动履带（40% 实测带不动）
@@ -56,6 +58,7 @@ class TankExecutor:
         self._wakeup = asyncio.Event()
         self._current: asyncio.Task | None = None
         self._current_desc: str | None = None
+        self._manual_t = -1e9  # 最近一次手柄指令的时间
         self._mission: asyncio.Task | None = None  # 闭环任务（如看图寻的），同一时间只有一个
         self._mission_desc: str | None = None
         self._worker: asyncio.Task | None = None
@@ -185,6 +188,32 @@ class TankExecutor:
         return len(self._queue)
 
     @property
+    def manual_active(self) -> bool:
+        return time.monotonic() - self._manual_t < MANUAL_HOLD_S
+
+    async def manual(self, left: int, right: int, barrel: int = 0):
+        """手机手柄：直接设两条履带速度（正数前进）和炮管（1 抬、-1 压、0 不动），不排队。
+        手动优先：有任务在跑或语音排了动作，先全部停掉。每条指令只管 MANUAL_MS，手柄不刷新车就自己停。"""
+        if (self._mission and not self._mission.done()) or self._queue or self._current:
+            await self.stop()
+            # 等被取消的动作真正收尾（它的 finally 会发 halt），否则那次 halt 可能落在下面的行驶指令之后
+            for _ in range(100):
+                if not self._current:
+                    break
+                await asyncio.sleep(0.01)
+        self._manual_t = time.monotonic()
+        clip = lambda v: max(-self.max_speed, min(int(v), self.max_speed))  # noqa: E731
+        left, right, barrel = clip(left), clip(right), max(-1, min(int(barrel), 1))
+        if not (left or right or barrel):
+            await self._safe_halt()
+            return
+        if left or right:
+            self.motion_epoch += 1
+            await self.backend.drive(left, right, MANUAL_MS)
+        if barrel:
+            await self.backend.turret(barrel * BARREL_UP_SPEED, MANUAL_MS)
+
+    @property
     def busy(self) -> bool:
         return bool(self._current or self._queue)
 
@@ -303,7 +332,7 @@ class TankExecutor:
         """情绪小动作。车正忙（有动作在做或在排队、或有任务在跑）时跳过，不打扰正事；动作都成对抵消，车和炮管回到原位。
         from_mission=True 表示是任务自己要做的小动作（例如闲逛时扭一扭），不受“有任务在跑”的限制。"""
         busy_mission = self._mission and not self._mission.done() and not from_mission
-        if kind not in EMOTES or self._current or self._queue or busy_mission:
+        if kind not in EMOTES or self._current or self._queue or busy_mission or self.manual_active:
             return None
         s = self._speed(100)
         moves = {

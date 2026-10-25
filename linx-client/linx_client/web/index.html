@@ -227,6 +227,12 @@
       </div>
     </div>
 
+    <div class="card section" id="pad-card" hidden>
+      <h2>手机手柄</h2>
+      <div id="pad-qr" style="display:flex;justify-content:center;padding:8px;background:#fff;border-radius:8px"></div>
+      <p class="hint" style="margin:8px 0 0;word-break:break-all">手机和电脑连同一个 Wi-Fi，扫码打开：<br><span id="pad-url"></span></p>
+    </div>
+
     <div class="card section">
       <h2>小车状态</h2>
       <dl>
@@ -306,6 +312,20 @@ function render(e) {
     case "info": add("event info", e.text); break;
     case "error": add("event error", "⚠ " + e.text); break;
   }
+}
+
+// 手机手柄二维码：二维码库从 CDN 加载，没网时只显示地址
+function setPad(url) {
+  $("pad-card").hidden = !url;
+  if (!url || $("pad-url").textContent === url) return;
+  $("pad-url").textContent = url;
+  const draw = () => { $("pad-qr").innerHTML = ""; new QRCode($("pad-qr"), { text: url, width: 168, height: 168 }); };
+  if (window.QRCode) return draw();
+  const s = document.createElement("script");
+  s.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
+  s.onload = draw;
+  s.onerror = () => { $("pad-qr").hidden = true; };
+  document.head.appendChild(s);
 }
 
 function setConn(state) {
@@ -408,6 +428,7 @@ function connect() {
       setConn(e.conn);
       setStatus(e.status);
       setGame(e.game);
+      setPad(e.pad_url);
       setMic(e.mic);
       if (mode === "ptt" && e.mic) send({ type: "mic", on: false });
     } else if (e.type === "conn") setConn(e.state);

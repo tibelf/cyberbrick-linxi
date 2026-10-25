@@ -279,12 +279,14 @@ async def _run(args):
         mood = Mood(tank)
         listeners.append(lambda e: e.get("type") == "emotion" and mood.on_emotion(e.get("emotion")))
     listeners.append(lambda e: e.get("type") == "tool" and game.on_tool(e.get("name")))  # 挑战中数指令
+    if args.pad:
+        args.web = True  # 手柄由网页服务提供
     if args.web:
         import webbrowser
 
         from .web import WebConsole
 
-        console = WebConsole(tank, session, port=args.web_port, game=game)
+        console = WebConsole(tank, session, port=args.web_port, game=game, pad=args.pad)
         game.on_change = lambda snap: console.publish({"type": "game", **snap})
         listeners.append(console.publish)
         if photo:
@@ -296,6 +298,8 @@ async def _run(args):
             })
         await console.start()
         print(f"🌐 网页控制台：{console.url}")
+        if console.pad_url:
+            print(f"🎮 手机手柄（手机和电脑连同一个 Wi-Fi，或扫控制台上的二维码）：{console.pad_url}")
         webbrowser.open(console.url)
     session.on_event = lambda e: [listen(e) for listen in listeners]
     _report_tank_errors(tank, session, console.publish if args.web else None)
@@ -306,6 +310,26 @@ async def _run(args):
     await session.close()
     runner.cancel()
     await tank.close()
+
+
+async def _pad(args):
+    """纯手柄模式：不连灵矽，只开网页手柄控车（不占 Device-Id，没网也能玩）。"""
+    import webbrowser
+
+    from .web import WebConsole
+
+    tank = _make_tank(args)
+    await tank.start()
+    console = WebConsole(tank, None, port=args.web_port, pad=True)
+    await console.start()
+    print(f"🌐 网页控制台：{console.url}")
+    print(f"🎮 手机手柄（手机和电脑连同一个 Wi-Fi，或扫控制台上的二维码）：{console.pad_url}")
+    print("Ctrl-C 退出")
+    webbrowser.open(console.url)
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await tank.close()
 
 
 async def _tank_test(args):
@@ -426,6 +450,11 @@ def main():
     p_run.add_argument("--no-mood", action="store_true", help="关闭情绪肢体语言（回复时的小动作和车灯）")
     p_run.add_argument("--web", action="store_true", help="同时打开网页控制台（对话记录、急停、按住说话、手动控车）")
     p_run.add_argument("--web-port", type=int, default=8080, help="网页控制台端口")
+    p_run.add_argument("--pad", action="store_true", help="同时开放手机手柄（局域网，地址带随机密钥；隐含 --web）")
+
+    p_pad = sub.add_parser("pad", help="只开手机手柄控车，不连灵矽")
+    _add_tank_args(p_pad)
+    p_pad.add_argument("--web-port", type=int, default=8080, help="网页端口")
     p_run.add_argument("--camera", help="开启拍照工具：0=电脑摄像头序号（0:1920x1440 = 指定分辨率），http://…=JPEG 快照地址，其他=图片文件")
     p_run.add_argument("--camera-view", choices=["overhead", "front"], default="overhead",
                        help="overhead=摄像头固定在场地旁边（俯拍或斜拍，越高越好），front=摄像头装在车上朝前")
@@ -480,6 +509,11 @@ def main():
             if v is not None and v.isdigit():
                 setattr(args, attr, int(v))
         asyncio.run(_run(args))
+    elif args.cmd == "pad":
+        try:
+            asyncio.run(_pad(args))
+        except KeyboardInterrupt:
+            pass
     elif args.cmd == "tank-test":
         asyncio.run(_tank_test(args))
     elif args.cmd == "camera-test":
