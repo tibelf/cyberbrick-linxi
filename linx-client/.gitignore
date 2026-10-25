@@ -3,3 +3,12 @@ __pycache__/
 .pytest_cache/
 .venv/
 .car_admin_password
+.car_host
+camera-test*.jpg
+# 拍到的照片、标注图、地图都可能拍到家里环境，仓库是公开的，一律不提交
+camera-*.jpg
+marker-test*.jpg
+map-test*.png
+markers.svg
+*.jpg
+*.jpeg

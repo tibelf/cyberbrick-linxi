@@ -76,6 +76,13 @@ class McpServer:
     def __init__(self, name: str = "CyberBrick 语音坦克"):
         self.name = name
         self.tools: dict[str, Tool] = {}
+        self.client_capabilities: dict = {}
+
+    @property
+    def vision(self) -> dict | None:
+        """平台下发的视觉接口 {url, token}；智控台没开视觉分析时为 None。"""
+        v = self.client_capabilities.get("vision")
+        return v if isinstance(v, dict) and v.get("url") else None
 
     def add_tool(self, name: str, description: str, props: list[Prop], handler: Handler) -> None:
         self.tools[name] = Tool(name, description, props, handler)
@@ -103,6 +110,8 @@ class McpServer:
             return None  # notifications/initialized 等
         try:
             if method == "initialize":
+                # 平台在这里下发自己的能力，例如视觉接口 capabilities.vision = {url, token}
+                self.client_capabilities = (msg.get("params") or {}).get("capabilities") or {}
                 result = {
                     "protocolVersion": PROTOCOL_VERSION,
                     "capabilities": {"tools": {}},

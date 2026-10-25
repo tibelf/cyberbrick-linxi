@@ -37,7 +37,16 @@ python -m linx_client activate                      # OTA 激活，打印 6 位�
 python -m linx_client run --backend mock            # 连灵矽，工具调用只打印不控车
 python -m linx_client run --backend serial --max-speed 40
 python -m linx_client run --no-audio --backend mock # 不开声卡，终端输入 `t 文字` 发文本调试
+python -m linx_client run --backend udp --web       # Wi-Fi 控车 + 网页控制台 http://localhost:8080
+python -m linx_client wifi-setup [--host IP] [--code-only|--uninstall]  # 给车装/更新/卸载 Wi-Fi 控车程序
+python -m linx_client car-exec --host IP "print(1)" # 无线在车上执行代码（维护密码读 .car_admin_password）
 python -m linx_client tank-test --backend serial    # 逐步测试每个动作（车先架空）
+python -m linx_client camera-test --camera 0        # 拍一张存成 camera-test.jpg，检查摄像头
+python -m linx_client run --backend udp --camera 0  # 加拍照工具 self.camera.take_photo（需智控台开启视觉分析；默认俯视 --camera-view overhead，车载用 front）
+python -m linx_client marker-print                  # 生成可打印的 ArUco 标记 markers.svg（0 号车顶，1–3 号目标）
+python -m linx_client marker-test --camera 0 --target 1号   # 实时打印目标在车头左/右几度、多远（不动车）
+python -m linx_client run --backend udp --camera 0 --marker --marker-targets "1=绿色瓶子"  # 标记闭环寻的，摄像头可手持
+python -m linx_client map-test --camera 0             # 拍一张建俯视地图存成 map-test.png（地上要平放 3 号锚点）
 python -m linx_client list-audio
 ```
 
@@ -49,10 +58,15 @@ python -m linx_client list-audio
 
 1. **灵矽平台（听和想）**：ASR → LLM（Function Call）→ TTS。把「前进两秒再开火」拆成多次 MCP `tools/call`。智控台必须把意图识别设为 Function Call，角色提示词在 `prompts/agent-prompt.md`。
 2. **linx-client（排程和安全）**
-   - `session.py`：WebSocket 会话。握手头必须带 `Authorization: Bearer`、`Device-Id`、`Client-Id`、`Protocol-Version`（所以客户端只能是本地程序，不能是网页）。上行 PCM 16k/20ms，下行格式以服务端 hello 为准（可能是 opus，需 opuslib）。默认半双工：TTS 播报期间丢弃麦克风帧。断线指数退避重连；收到 `config_updated` 通知会主动断开重连。
+   - `session.py`：WebSocket 会话。握手头必须带 `Authorization: Bearer`、`Device-Id`、`Client-Id`、`Protocol-Version`（所以客户端只能是本地程序，不能是网页）。上行 PCM 16k/20ms，下行格式以服务端 hello 为准（可能是 opus，需 opuslib）。默认半双工：TTS 播报期间丢弃麦克风帧（声卡余音约 0.4s 也算播报中）。`--duplex` 全双工：播报期间只上传静音，`echo.py` 的 `BargeInDetector` 按「麦克风音量 / 播放音量」估回声增益，明显超过回声才算插话，打断后补传那几帧原声。断线指数退避重连；收到 `config_updated` 通知会主动断开重连。
    - `mcp.py`：设备端 MCP 服务（平台是客户端），消息封装为 `{"type":"mcp","payload":<JSON-RPC>}`。参数只用 integer/string/boolean；`Prop.coerce` 会把整数裁剪到 min/max。工具异常一律转成 `isError` 结果返回，绝不让连接断掉。
    - `tools.py`：工具名、描述、参数 schema。**描述文字直接决定大模型何时调用**（如 fire 只在用户明确要求时调用）。
-   - `tank/executor.py`：动作队列。工具调用**立即返回「已安排」**，动作在后台 worker 中顺序执行，因此多次调用会自然串成序列。`stop()` 不进队列：清空队列、取消当前动作、halt。
+   - `tank/executor.py`：动作队列。工具调用**立即返回「已安排」**，动作在后台 worker 中顺序执行，因此多次调用会自然串成序列。`stop()` 不进队列：清空队列、取消当前动作、halt。动作在后台失败时记进 `last_error` 并通过 `on_error` 通知（网页 + 语音），不能只打印；`check()` 调用 backend 可选的 `ping()` 真的问车（UDP 用车端 `stat` 的开机时长发现车重启过），空闲时每 5 秒心跳。
+   - `camera.py`：拍照工具。取图来源 `--camera`（数字=电脑摄像头 OpenCV，http=JPEG 快照地址如车载 ESP32S3，其他=文件）；视觉接口 url/token 来自 MCP initialize 的 `capabilities.vision`（`McpServer.vision`），字段 `question` + `file`（camera.jpg）
+   - `seek.py`：看图闭环寻的 `self.tank.seek`（有 `--camera` 才注册）。平台一轮只执行一次工具调用，所以“拍照→换算→转向/前进→再拍”的循环在本地跑：`TankExecutor.start_mission` 启动，`stop()` 会连任务一起取消，每一步仍走 move/turn/fire 的安全约束；任务期间不插情绪小动作；结束后 `session.say()` 播报。视觉模型被要求按固定格式回答，解析不了就重问一次再放弃。goal = approach / aim / hit（撞倒）。**没完成不停**：不按步数收工，只在视觉模型确认完成（“是否已经紧挨着”“是否倒了”的是/否追问）、超时 120s、连续 3 次看不到、脱困 2 次仍卡住时结束；“到了”不能只凭坐标（低机位前后距离被压扁）。外部摄像头（overhead）只问外框 `坦克=x1,y1,x2,y2；目标=…`（百分比，0-1000 自动换算，只给中心点也兼容），用底边中点算方向、以车身大小为单位算间隙；车头方向由程序比较前进前后的位置算出（不要让视觉模型判断朝向，实测不可靠）；车载前视问 `找到=…；偏角=…；近=…`。`session.say()` 的内容平台会当成一句用户输入再复述，所以加【小车播报】前缀，提示词要求只转告不调工具
+   - `marker.py` + `marker_seek.py`（`--marker`）：ArUco 标记闭环寻的，**代替视觉模型估坐标**。车顶 0 号标记（DICT_4X4_50，箭头朝车头），目标贴 1–9 号标记（`--marker-targets` 登记名字）或按颜色认。每帧 solvePnP 得到车身坐标系（x 右、y 车头、z 上），目标标记直接换算、颜色目标取色块底边中点与地面（车顶下 `--car-height-cm`）求交，得出“左/右几度、多少厘米”——**只和车与目标的相对位置有关，所以摄像头可以手拿着动**。焦距不标定，按 `--focal-ratio`×宽度估。控制 10Hz：偏 >25° 停下用校准过的 `turn`，否则 `executor.steer()` 差速边开边掰（每条只管 0.4s，画面卡住车自己停；只能由当前任务调用）；看不到车或目标立刻停，8s 还看不到就放弃；hit 用标记倾角变化或视觉模型确认是否倒了。开始 2s 看不到车顶标记、或目标没标记也没颜色，就退回 `seek.py`。电脑摄像头（`OpenCVCamera`）改为常开 + 后台线程读最新帧，开头等 1s 预热，拍照前检查全黑
+   - `floormap.py` + `navigate.py`（`--marker` 时启用，语音“拍一张地图”= `self.map.build`）：**俯视地图**。地上平放锚点标记（`--anchor-id`，默认 3 号）当原点；`MarkerTracker.anchor_view()` 给出锚点坐标系里车的 (x, y, 朝向) 和各目标标记位置——锚点不动，所以手持也行。`build_map` 用锚点位姿把照片拉平成 1cm/像素俯视图，地面颜色从锚点四周、车四周、车走过的地方（`Navigator.visited`）取样聚类，不像地面的按颜色分块：有视觉模型时只保留落在它列出的框里的块（并按框命名，地垫/地毯不算），没有时全当障碍物（**不要用“大片均匀=地垫”去猜：墙也是大片均匀**）；看不到的地方也算走不通；膨胀车身半径+余量后 2cm 栅格 A*，路线拉直。`Navigator.goto` 10Hz 沿路线开，下一段穿过膨胀区就重规划，看不到锚点/车就停。`MarkerSeeker` 有地图时先 `goto` 到目标 30cm 内再交给原来的贴近/撞；目标是视觉模型命名的障碍物（没贴标记）时转过去就算到/直接撞。`Wanderer.navigator` 有地图时在地图上随机挑空地逛，看不到锚点就退回看图模式 15s
+   - `wander.py`：自由闲逛 `self.tank.wander`。**没有步数上限，只有 stop()（语音“停”、回车、网页急停）才结束**；**流水线**：车走着就拍照分析，下一段（1.2–2.5s）提前排进队列，当前段走完立刻接上；最多提前一段。前方堵住立刻刹车转向；偶尔停下做小动作（`emote(..., from_mission=True)`、摇炮管、停顿）。车头方向靠 executor 的 `motion_epoch / idle_epoch / turn_total`：两张照片之间只做过前进时用位移测朝向，转过之后按 `turn_total` 推算。一直在走却没挪动或四周堵死就后退掉头；看不清立刻停车；外部摄像头下靠近画面边缘不往外走。**闲逛绝不开火**。和平台断开时暂停（`paused=lambda: session.ws is None`），重连后继续；一步出错不结束任务；连续 3 次看不清就改成**闭眼慢逛**（速度 60、短段、常转向），后台每 4s 试一次摄像头，看清了自动恢复——闲逛不会因为看不清而结束。没开 `--camera` 时也注册 wander（一直闭眼慢逛）。新任务（seek/wander）会接替正在跑的任务
    - `tank/backend.py` 定义 `TankBackend` Protocol + `MockBackend`；`serial_repl.py` 是实车驱动。
 3. **CyberBrick Core（执行和保底）**：`serial_repl.py` 连接时进入 raw REPL，一次性注入 `BOOTSTRAP`（定义 `drive/aim/fire/halt` + `machine.Timer` 看门狗），之后每条指令只发一行函数调用，设备端不 sleep。
 
@@ -64,4 +78,4 @@ python -m linx_client list-audio
 
 ## Tests
 
-`tests/` 覆盖 MCP 协议、executor（急停/限速/冷却）、raw REPL 解析（用假串口对象），以及 `test_session.py` 用本地 `websockets` 假平台跑通完整握手 → initialize → tools/list → tools/call。新增平台交互时优先扩展这个假平台测试。
+`tests/marker_sim.py` 是标记跟踪的仿真（贴了标记的车 + 目标，从可以晃动的虚拟相机渲染画面，按差速运动学移动），`test_marker.py` 用它跑方位/距离精度和完整闭环。`tests/` 还覆盖 MCP 协议、executor（急停/限速/冷却）、raw REPL 解析（用假串口对象），以及 `test_session.py` 用本地 `websockets` 假平台跑通完整握手 → initialize → tools/list → tools/call。新增平台交互时优先扩展这个假平台测试。

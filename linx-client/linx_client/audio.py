@@ -6,6 +6,8 @@
 import asyncio
 import queue
 import threading
+import time
+from collections import deque
 
 IN_RATE = 16000
 IN_FRAME_MS = 20
@@ -45,6 +47,24 @@ class Microphone:
         self._stream.close()
 
 
+class PlaybackMeter:
+    """记录最近播放出去的音量，给插话检测估算“此刻麦克风里大概有多少回声”。"""
+
+    WINDOW_S = 0.4  # 声卡输出有延迟、房间有混响，取最近 0.4 秒的最大值
+
+    def __init__(self):
+        self._played: deque[tuple[float, float]] = deque(maxlen=64)  # (写出时间, RMS)
+
+    def record(self, data: bytes):
+        from .echo import rms
+
+        self._played.append((time.monotonic(), rms(data)))
+
+    def level(self) -> float:
+        cutoff = time.monotonic() - self.WINDOW_S
+        return max((r for t, r in list(self._played) if t >= cutoff), default=0.0)
+
+
 class Speaker:
     def __init__(self, sample_rate: int, fmt: str = "pcm", frame_ms: int = 60, device=None):
         import sounddevice as sd
@@ -59,6 +79,7 @@ class Speaker:
             self._decoder = opuslib.Decoder(sample_rate, 1)
             self._frame_samples = sample_rate * frame_ms // 1000
         self._q: queue.Queue[bytes | None] = queue.Queue()
+        self.meter = PlaybackMeter()
         self._stream = sd.RawOutputStream(samplerate=sample_rate, channels=1, dtype="int16", device=device)
         self._thread = threading.Thread(target=self._play, daemon=True)
 
@@ -87,6 +108,7 @@ class Speaker:
             data = self._q.get()
             if data is None:
                 return
+            self.meter.record(data)
             self._stream.write(data)
 
     def stop(self):

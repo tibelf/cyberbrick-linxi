@@ -8,10 +8,12 @@
 /wifi.json 格式：{"networks": [{"ssid": ..., "password": ...}, ...], "admin_password": "8-9 位"}
 协议：每个 UDP 包一条 ASCII 指令，回一条应答。
   ping                  -> pong
+  stat                  -> stat up=<开机秒数> mem=<空闲内存>（主机据此发现车中途重启过）
   drive <l> <r> <ms>    l/r: -100..100，正数前进
   turret <sp> <ms>      sp: -100..100，0 为停
   fire <ms>             扣扳机，ms 后看门狗回位
   halt                  -> ok
+  led <r> <g> <b>       车灯颜色 0-255
 成功回 ok，失败回 err <原因>。
 时长语义与 USB 版 BOOTSTRAP 相同：指令只设状态并启动看门狗，到点自动 halt；
 主机掉线或 Wi-Fi 断开时，车会在最后一条指令的 ms 到期后自己停下。
@@ -66,6 +68,9 @@ def handle(line):
     try:
         if cmd == 'ping':
             return 'pong'
+        if cmd == 'stat':
+            import gc
+            return 'stat up=%d mem=%d' % (time.ticks_ms() // 1000, gc.mem_free())
         if cmd == 'halt':
             halt()
             return 'ok'
@@ -83,6 +88,9 @@ def handle(line):
         if cmd == 'fire' and len(args) == 1:
             _s.set_angle(2, TRIG_FIRE)
             _arm(_clip(args[0], 1, MAX_MS))
+            return 'ok'
+        if cmd == 'led' and len(args) == 3:
+            _led(*(_clip(a, 0, 255) for a in args))
             return 'ok'
     except ValueError:
         return 'err 参数不是整数'
@@ -110,6 +118,11 @@ def _connect(cfg):
         while not sta.isconnected() and time.ticks_diff(time.ticks_ms(), t0) < 15000:
             time.sleep_ms(200)
         if sta.isconnected():
+            try:
+                # 关掉 Wi-Fi 省电：省电时射频间歇休眠，会漏收广播，控车指令也多几十到上百毫秒延迟
+                sta.config(pm=sta.PM_NONE)
+            except Exception as e:
+                print('[wifi] 关闭省电失败', e)
             return net['ssid'], sta.ifconfig()[0]
         sta.disconnect()
     sta.active(False)

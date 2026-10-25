@@ -65,3 +65,58 @@ def test_session_against_fake_platform():
         assert "drive" in kinds and "fire" in kinds
 
     asyncio.run(main())
+
+
+class FakeSpeaker:
+    def __init__(self):
+        self.fed: list[bytes] = []
+        self.flushed = 0
+
+    def feed(self, data):
+        self.fed.append(data)
+
+    def busy(self):
+        return False
+
+    def flush(self):
+        self.flushed += 1
+
+
+def test_abort_stops_tts_and_drops_leftover_audio():
+    async def main():
+        got_abort = asyncio.Event()
+        seen = {}
+
+        async def platform(ws):
+            await ws.recv()  # hello
+            await ws.send(json.dumps({"type": "hello", "session_id": "s1", "audio_params": {"format": "pcm"}}))
+            await ws.recv()  # listen start
+            await ws.send(json.dumps({"type": "tts", "state": "start"}))
+            await ws.send(b"before")
+            seen["abort"] = json.loads(await ws.recv())
+            got_abort.set()
+            await ws.send(b"leftover")  # 打断后服务端可能还有残余音频
+            await ws.send(json.dumps({"type": "tts", "state": "stop"}))
+            await ws.send(json.dumps({"type": "tts", "state": "start"}))  # 下一轮回复照常播放
+            await ws.send(b"next")
+            await asyncio.sleep(0.2)
+            await ws.close()
+
+        async with serve(platform, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            ident = Identity(mac="02:00:00:00:00:01", client_id="cid")
+            session = LinxSession(ident, McpServer(), lambda: (f"ws://127.0.0.1:{port}/v1/ws/", "tok"), audio=False)
+            speaker = session._speaker = FakeSpeaker()
+            run = asyncio.create_task(session._run_once())
+            while speaker.fed != [b"before"]:
+                await asyncio.sleep(0.01)
+            assert await session.abort() is True
+            await asyncio.wait_for(got_abort.wait(), 2)
+            await asyncio.wait_for(run, 5)
+
+        assert seen["abort"] == {"session_id": "s1", "type": "abort", "reason": "wake_word_detected"}
+        assert speaker.flushed >= 1
+        assert speaker.fed == [b"before", b"next"]
+        assert await session.abort() is False  # 没在说话时不发 abort
+
+    asyncio.run(main())

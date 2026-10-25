@@ -14,15 +14,21 @@ class TankBackend(Protocol):
         """left/right: -100..100，正数前进。"""
 
     async def turret(self, speed: int, failsafe_ms: int) -> None:
-        """炮塔以 speed（-100..100，0 为停）持续转动。"""
+        """炮管俯仰舵机以 speed（-100..100，0 为停）持续转动（车端指令名沿用 turret）。"""
 
     async def fire(self, pulse_ms: int) -> None:
         """扣下扳机（一发），failsafe 到点自动回位。"""
 
     async def halt(self) -> None:
-        """立刻关闭所有输出。"""
+        """立刻关闭所有输出（不影响车灯）。"""
+
+    async def led(self, r: int, g: int, b: int) -> None:
+        """车灯颜色（0-255），纯装饰。"""
 
     async def close(self) -> None: ...
+
+    # 可选：async def ping(self) -> dict —— 真的问一下车，返回 {"online": True, "link": ..., "latency_ms": ...,
+    # "rebooted": 是否刚重启过}；车不应答就抛异常。executor.check() 和心跳会用到
 
 
 class MockBackend:
@@ -51,6 +57,12 @@ class MockBackend:
 
     async def halt(self):
         self._log("halt")
+
+    async def led(self, r, g, b):
+        self._log("led", r, g, b)
+
+    async def ping(self) -> dict:
+        return {"online": True, "link": "mock（没接车）"}  # 不记进 calls，免得干扰测试
 
     async def close(self):
         self._log("close")
