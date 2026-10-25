@@ -79,9 +79,12 @@ class LinxSession:
         await self._send_json({"session_id": self.session_id, "type": "listen", "state": "detect", "text": text})
 
     async def say(self, text: str):
-        """让小车主动播报一句话（listen.detect 的 text_response，见 websocket 协议文档；平台效果待实测）。"""
+        """让小车主动播报一句话（listen.detect 的 text_response，见 websocket 协议文档）。
+
+        2026-10-25 实测：平台把它当成一句用户输入，大模型再复述一遍。所以加上【小车播报】前缀，
+        提示词要求看到这个前缀时只复述、不调用工具，免得大模型把“已经到瓶子旁边了”当成新指令。"""
         await self._send_json({"session_id": self.session_id, "type": "listen", "state": "detect",
-                               "text": "任务完成", "text_response": text})
+                               "text": "任务完成", "text_response": f"【小车播报】{text}"})
 
     async def abort(self) -> bool:
         """打断小车说话：通知平台中止本轮回复，本地立即静音。小车没在说话时什么也不做。"""

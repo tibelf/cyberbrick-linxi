@@ -111,16 +111,18 @@ def register_camera_tools(mcp: McpServer, photo, view: str = "overhead", seeker=
     if seeker is not None:
         mcp.add_tool(
             "self.tank.seek",
-            "让小车自己看着摄像头去找某个目标：找到后转向对准，goal=approach 时还会走到它跟前。"
-            "小车会自己反复拍照、微调，直到对准或走到，完成后自己播报结果，你只需要调用一次，"
+            "让小车自己看着摄像头去完成一个目标：goal=approach 走到它跟前（碰到或紧挨着），aim 原地转向对准，"
+            "hit 冲上去把它撞倒/撞开。小车会自己反复拍照、微调，没完成不会停，完成后自己播报结果，你只需要调用一次，"
             "然后告诉用户“收到，我边看边找”，不要再连续调用 take_photo、turn、move。"
-            "用户说“去红色杯子那里/找到那个盒子/对准杯子”时用它。"
+            "用户说“去红色杯子那里/走到瓶子旁边”用 approach，“对准杯子”用 aim，“把瓶子撞倒/撞一下那个盒子/推开它”用 hit。"
+            "hit 只能撞瓶子、盒子这类物品，绝不能撞人或动物，用户要求撞人时拒绝。"
             "fire 只有在用户这句话里明确说了“开火/发射/打它”时才设为 true，对准后会打一发；否则必须是 false。"
             "摄像头固定在场地旁边时，小车要先往前走一小段才能看出车头朝哪，所以 aim 也会稍微移动。"
             "绝不对准人或动物。",
             [
                 Prop("target", "string", "要找的目标，越具体越好，例如“红色杯子”"),
-                Prop("goal", "string", "approach=走到目标跟前，aim=原地转向对准", enum=["approach", "aim"],
+                Prop("goal", "string", "approach=走到目标跟前，aim=原地转向对准，hit=撞倒/撞开目标",
+                     enum=["approach", "aim", "hit"],
                      default="approach"),
                 Prop("fire", "boolean", "对准后是否开火（用户明确要求才为 true）", default=False),
             ],
