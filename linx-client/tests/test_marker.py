@@ -53,6 +53,15 @@ def test_resolve_target():
     assert resolve_target("那个东西", {}).kind == "any_marker"
 
 
+def test_marker_svg_fits_a4_so_browser_does_not_shrink_it():
+    import re
+
+    w, h = (float(v) for v in re.search(r'width="([\d.]+)mm" height="([\d.]+)mm"', marker_svg(6)).groups())
+    assert w <= 185 and h <= 270  # 超出 A4 可打印区域时浏览器会自动缩小，打出来就不是 6 cm（2026-10-25 用户打印预览只有约 4.7 cm）
+    with pytest.raises(ValueError):
+        marker_svg(20)
+
+
 def test_marker_svg_has_exact_size():
     svg = marker_svg(6)
     assert 'font-size' in svg and "黑框边长 6 cm" in svg and "0 号 · 贴车顶" in svg and svg.count("<rect") > 4 * 10
@@ -89,6 +98,13 @@ def test_drives_to_color_target():
     said = asyncio.run(_run(world, target="绿色瓶子", labels={}, time_limit_s=20))
     assert said[0].startswith("已走到"), said
     assert world.dist() < ARRIVE_CM + 8
+
+
+def test_color_target_right_next_to_car_still_seen():
+    """瓶子紧挨着车时也要认得出（之前把车周围一圈像素抹掉，连瓶子一起抹了，负载高时会报“看不到”）。"""
+    w = World(car=(0, 0, 0.0), target=(13, 0), target_kind="color", cam=(-40, -60, 70))
+    s = MarkerTracker().locate(w.render(), Target("color", color="绿"))
+    assert s.target and abs(s.distance - 13) < 3
 
 
 def test_aim_turns_in_place():

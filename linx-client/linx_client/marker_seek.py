@@ -159,11 +159,20 @@ class MarkerSeeker:
                 b, d = s.bearing, s.distance
                 if goal == "aim":
                     if abs(b) <= AIM_TOLERANCE_DEG:
-                        return True, f"已对准{target}"
+                        again = await self._look(spec)
+                        if again.car and again.target and abs(again.bearing) <= AIM_TOLERANCE_DEG + 2:
+                            return True, f"已对准{target}"
+                        continue
                     await self._turn(b)
                     continue
                 if goal == "approach" and d <= ARRIVE_CM:
-                    return True, f"已走到{target}跟前"
+                    # 单帧可能看错（标记位姿偶尔会翻转），停下再看一眼，两次都说到了才算
+                    await self.tank.halt_now()
+                    await asyncio.sleep(0.2)
+                    again = await self._look(spec)
+                    if again.car and again.target and again.distance <= ARRIVE_CM + 3:
+                        return True, f"已走到{target}跟前"
+                    continue
                 if goal == "hit" and d <= RAM_ZONE_CM and abs(b) <= RAM_ALIGN_DEG:
                     rams += 1
                     await self._ram()

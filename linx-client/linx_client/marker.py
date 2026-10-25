@@ -146,10 +146,18 @@ class MarkerTracker:
         for lo, hi in COLORS[color]:
             m = cv2.inRange(hsv, np.array(lo, np.uint8), np.array(hi, np.uint8))
             mask = m if mask is None else mask | m
-        for cx, cy, r in exclude:
-            cv2.circle(mask, (int(cx), int(cy)), int(r), 0, -1)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        def on_car(c):
+            # 只排除中心落在车身上的色块；不能把车周围的像素整块抹掉，否则目标挨着车时会被一起抹掉
+            m = cv2.moments(c)
+            if not m["m00"]:
+                return True
+            x, y = m["m10"] / m["m00"], m["m01"] / m["m00"]
+            return any(math.hypot(x - cx, y - cy) < r for cx, cy, r in exclude)
+
+        contours = [c for c in contours if not on_car(c)]
         if not contours:
             return None
         c = max(contours, key=cv2.contourArea)
@@ -174,7 +182,7 @@ class MarkerTracker:
         if target.kind == "color":
             c = found[CAR_ID].mean(axis=0)
             side = np.linalg.norm(found[CAR_ID][0] - found[CAR_ID][2])
-            px = self._color_blob(frame, target.color, [(c[0], c[1], side * 1.6)])
+            px = self._color_blob(frame, target.color, [(c[0], c[1], side * 0.8)])  # side 是对角线长
             if px is not None:
                 s.target_px = px
                 xy = self._floor_point(px, K, R, t)
@@ -223,13 +231,15 @@ def marker_svg(size_cm: float = MARKER_CM, target_ids=(1, 2, 3)) -> str:
     dictionary = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, DICT_NAME))
     mm = size_cm * 10
     cell = mm / 6
-    gap = 25  # 标记之间留白，四周的白边是识别必需的
+    gap = 15  # 标记之间留白，四周的白边是识别必需的；整页要放进 A4 的可打印区域（约 190×277mm），否则浏览器会缩小
     items = [(CAR_ID, "0 号 · 贴车顶", "箭头朝车头")] + [(i, f"{i} 号 · 贴目标", "") for i in target_ids]
-    cols = 2
+    cols = 2 if gap + 2 * (mm + gap) <= 185 else 1
     rows = (len(items) + cols - 1) // cols
-    pitch_x, pitch_y = mm + gap * 2, mm + gap + 22
+    pitch_x, pitch_y = mm + gap, mm + gap + 10
     width = gap + cols * pitch_x
     height = gap + rows * pitch_y + 14
+    if width > 185 or height > 270:
+        raise ValueError(f"{size_cm:g} cm 的标记一页 A4 放不下，换小一点（比如 6）")
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}mm" height="{height}mm" '
            f'viewBox="0 0 {width} {height}"><rect width="100%" height="100%" fill="white"/>']
     for k, (mid, label, note) in enumerate(items):
