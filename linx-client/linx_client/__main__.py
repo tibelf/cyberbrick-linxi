@@ -230,6 +230,13 @@ async def _run(args):
             print("🔳 标记跟踪：车顶 0 号标记，目标 " + (args.marker_targets or "1–9 号标记或颜色"))
         register_camera_tools(mcp, photo, view=args.camera_view, seeker=seeker, wanderer=wanderer)
         print(f"📷 摄像头：{args.camera}（需在智控台开启视觉分析）")
+    else:
+        from .tools import register_wander_tool
+        from .wander import Wanderer
+
+        # 没开摄像头也能闲逛：闭着眼慢慢逛，说“停”才停
+        register_wander_tool(mcp, Wanderer(tank, None, say=lambda text: session.say(text),
+                                           paused=lambda: session.ws is None), camera=False)
     session = LinxSession(
         ident,
         mcp,

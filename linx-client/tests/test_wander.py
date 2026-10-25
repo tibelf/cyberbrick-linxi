@@ -117,16 +117,56 @@ def test_front_view_turns_to_open_side():
     asyncio.run(main())
 
 
-def test_stops_and_says_when_blind():
+def test_keeps_wandering_blind_when_camera_fails():
+    """摄像头关了/看不清：不结束闲逛，改成闭眼慢逛（低速），绝不开火；说“停”才停。"""
     async def main():
         be, tank, said = await _start([])  # 一直“看不清”
-        for _ in range(60):
-            if not tank.status()["mission"]:
-                break
-            await asyncio.sleep(0.1)
+        await asyncio.sleep(5)
+        assert tank.status()["mission"] == "自由闲逛"
+        drives = [d for d in _drives(be) if d[1] == d[2] > 0]
+        assert drives and all(d[1] <= wander.BLIND_SPEED for d in drives)
+        assert "闭着眼" in said[0] and not [c for c in be.calls if c[0] == "fire"]
+        await tank.stop()
         await tank.close()
-        assert tank.status()["mission"] is None and "看不清画面" in said[0]
-        assert not _drives(be)
+
+    asyncio.run(main())
+
+
+def test_blind_from_start_without_camera():
+    async def main():
+        be = MockBackend(verbose=False)
+        tank = TankExecutor(be)
+        await tank.start()
+        Wanderer(tank, None, rng=random.Random(2))()
+        await asyncio.sleep(1.5)
+        assert tank.status()["mission"] == "自由闲逛" and _drives(be)
+        await tank.stop()
+        await tank.close()
+
+    asyncio.run(main())
+
+
+def test_returns_to_vision_when_camera_recovers(monkeypatch):
+    monkeypatch.setattr(wander, "BLIND_RETRY_S", 0.3)
+
+    async def main():
+        state = {"ok": False, "x": 10.0}
+
+        def answers(q):
+            if not state["ok"]:
+                raise OSError("摄像头 0 已经 5 秒没有新画面，可能断开了")
+            state["x"] += 3
+            return f"坦克={state['x']:.0f},50；空地=右,上,下"
+
+        be, tank, said = await _start(answers)
+        await asyncio.sleep(4)  # 三次看不清 → 闭眼慢逛
+        assert any("闭着眼" in t for t in said)
+        state["ok"] = True
+        await asyncio.sleep(1.5)
+        assert any("又看得清了" in t for t in said)
+        assert tank.status()["mission"] == "自由闲逛"
+        await tank.stop()
+        await tank.close()
 
     asyncio.run(main())
 

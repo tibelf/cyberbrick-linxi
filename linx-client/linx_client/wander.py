@@ -12,8 +12,10 @@
 安全：
 - 只用移动、转向、炮管和情绪小动作，**闲逛时绝不开火**。
 - 每个动作仍经过 TankExecutor 的限速和时长上限；最多提前排一段，走的过程中一直在看，看到障碍立刻刹车。
-- 看不清（拍照失败、回答格式不对）时立刻停车，不闭着眼开。
-- 和平台断开时（听不到“停”了）先停在原地，重连后自动继续；看不清画面连续 3 次就停下并播报。
+- 看不清（拍照失败、回答格式不对）时先停一下；连续 3 次看不清就改成**闭眼慢逛**（降速、走短段、常转向），
+  并在后台每隔几秒试一次摄像头，看清了自动回到边看边逛。闲逛不会因为看不清而结束，只有说“停”才停
+  （2026-10-25 用户反馈：关了摄像头闲逛就被打断）。没开摄像头（ask=None）时一开始就是闭眼慢逛。
+- 和平台断开时（听不到“停”了）先停在原地，重连后自动继续。
 """
 
 import asyncio
@@ -34,12 +36,23 @@ STUCK_MIN_S = 0.4  # 两张照片之间一直在往前走超过这么久、却�
 EDGE_PCT = 12.0  # 坦克离画面边缘小于这个（%）时，不再往那个方向走
 KEEP_HEADING = 0.7  # 有空地时，顺着当前方向继续走的概率
 FLOURISH = 0.15  # 每排一段之前，先停下来做个小动作的概率
-MAX_BLIND = 3  # 连续看不清几次就停下
+MAX_BLIND = 3  # 连续看不清几次就改成闭眼慢逛
+BLIND_SPEED = 60  # 闭眼慢逛：速度低一点，撞到也不疼（再低履带带不动）
+BLIND_SEG_MS = (500, 1100)  # 走短段，经常换方向，不会一头扎进角落里
+BLIND_TURN = 0.5  # 每段之前转个向的概率
+BLIND_RETRY_S = 4.0  # 闭眼时每隔这么久在后台试一次摄像头
 
 DIRS = {  # 画面方向（x 向右，y 向下）
     "上": (0, -1), "下": (0, 1), "左": (-1, 0), "右": (1, 0),
     "左上": (-1, -1), "右上": (1, -1), "左下": (-1, 1), "右下": (1, 1),
 }
+
+Q_EXTERNAL = ("画面里有一辆履带小坦克。给出它中心在画面中的位置（百分比坐标：左上角 0,0，右下角 100,100），"
+    "再看它周围一个车身长以内，哪些方向是空地、没有障碍物、墙、桌腿或台阶"
+    "（方向按画面说：上、下、左、右、左上、右上、左下、右下）。"
+    "只用这个格式回答一行，不要解释：坦克=x,y；空地=上,左上。四周都被挡住写 空地=无；看不到坦克写 坦克=无")
+Q_FRONT = ("这是装在小车上朝前拍的画面。看前方大约 30 厘米以内：正前方、左前方、右前方有没有障碍物"
+    "（墙、桌腿、箱子、台阶等）？只用这个格式回答一行，不要解释：前方=通或堵；左=通或堵；右=通或堵")
 
 Ask = Callable[[str], Awaitable[str]]
 Say = Callable[[str], Awaitable[None]]
@@ -153,10 +166,57 @@ class Wanderer:
             return None
         return rotate(self.heading, self.tank.turn_total - self.heading_tt)
 
+    # ---- 闭眼慢逛 ----
+    async def _blind_step(self):
+        if self.tank.queued:
+            return  # 保持只提前排一段
+        if self.rng.random() < FLOURISH:
+            await self._flourish()
+        if self.rng.random() < BLIND_TURN:
+            self._queue_turn(self.rng.choice((-1, 1)) * self.rng.randint(30, 150))
+        self.tank.move("forward", self.rng.randint(*BLIND_SEG_MS), BLIND_SPEED)
+
+    async def _camera_ok(self) -> bool:
+        """后台试一次摄像头：拍得到、视觉模型按格式回答、（外部摄像头）找得到车，就算看清了。"""
+        try:
+            if self.view == "overhead":
+                r = await self._ask_parsed(Q_EXTERNAL, parse_surroundings)
+                return r is not None and r["car"] is not None
+            return await self._ask_parsed(Q_FRONT, parse_front_path) is not None
+        except Exception:  # noqa: BLE001
+            return False
+
+    async def _run_blind(self):
+        """闭眼慢逛，直到摄像头又看得清（返回）或被 stop() 取消。"""
+        probe = None
+        last_try = time.monotonic()
+        try:
+            while True:
+                await self._wait_if_paused()
+                if self.ask and probe is None and time.monotonic() - last_try >= BLIND_RETRY_S:
+                    probe = asyncio.create_task(self._camera_ok())
+                if probe is not None and probe.done():
+                    if probe.result():
+                        await self.tank.halt_now()
+                        self.last = None
+                        print("👀 又看得清了，接着边看边逛")
+                        if self.say:
+                            await self.say("又看得清了，接着边看边逛")
+                        return
+                    probe, last_try = None, time.monotonic()
+                await self._blind_step()
+                await asyncio.sleep(0.2)
+        finally:
+            if probe is not None:
+                probe.cancel()
+
     # ---- 主循环 ----
     async def run(self):
         blind = 0
         last_look = 0.0
+        if self.ask is None:
+            print("🙈 没有摄像头：闭着眼慢慢逛，说“停”才停")
+            await self._run_blind()  # 没有摄像头时永远不会返回
         while True:
             await self._wait_if_paused()
             wait = self.look_gap_s - (time.monotonic() - last_look)
@@ -177,15 +237,17 @@ class Wanderer:
             if ok:
                 blind = 0
                 continue
-            await self.tank.halt_now()  # 看不清就别闭着眼开
+            await self.tank.halt_now()  # 先停一下，再看一次
             self.last = None
             blind += 1
             if blind >= MAX_BLIND:
-                msg = "看不清画面了，先停下来。检查一下摄像头再叫我"
-                print(f"🛑 {msg}")
+                msg = "看不清画面了，先闭着眼慢慢逛，摄像头好了我会自动接着看"
+                print(f"🙈 {msg}")
                 if self.say:
                     await self.say(msg)
-                return
+                await self._run_blind()
+                blind = 0
+                continue
             await asyncio.sleep(1)
 
     async def _ask_parsed(self, question: str, parse):
@@ -210,10 +272,7 @@ class Wanderer:
         self._queue_forward(self.rng.randint(*self.seg_ms))
 
     async def _step_external(self, snap, t) -> bool:
-        q = ("画面里有一辆履带小坦克。给出它中心在画面中的位置（百分比坐标：左上角 0,0，右下角 100,100），"
-             "再看它周围一个车身长以内，哪些方向是空地、没有障碍物、墙、桌腿或台阶"
-             "（方向按画面说：上、下、左、右、左上、右上、左下、右下）。"
-             "只用这个格式回答一行，不要解释：坦克=x,y；空地=上,左上。四周都被挡住写 空地=无；看不到坦克写 坦克=无")
+        q = Q_EXTERNAL
         r = await self._ask_parsed(q, parse_surroundings)
         if r is None or r["car"] is None:
             return False
@@ -250,8 +309,7 @@ class Wanderer:
         return True
 
     async def _step_front(self) -> bool:
-        q = ("这是装在小车上朝前拍的画面。看前方大约 30 厘米以内：正前方、左前方、右前方有没有障碍物"
-             "（墙、桌腿、箱子、台阶等）？只用这个格式回答一行，不要解释：前方=通或堵；左=通或堵；右=通或堵")
+        q = Q_FRONT
         r = await self._ask_parsed(q, parse_front_path)
         if r is None:
             return False
