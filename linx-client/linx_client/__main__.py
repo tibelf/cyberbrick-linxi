@@ -206,6 +206,14 @@ async def _run(args):
     await tank.start()
     mcp = McpServer()
     register_tank_tools(mcp, tank)
+    from pathlib import Path
+
+    from .macros import Macros
+    from .tools import register_macro_tools
+
+    # 动作宏存在身份文件旁边（本地数据，已 gitignore）
+    register_macro_tools(mcp, Macros(tank, Path(args.state).with_name(".macros.json"),
+                                     say=lambda text: session.say(text)))
     photo = None
     if args.camera:
         from .camera import PhotoTool, make_camera

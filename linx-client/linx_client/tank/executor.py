@@ -70,6 +70,8 @@ class TankExecutor:
         self.link: dict | None = None  # 最近一次和车通信的结果（心跳或 check() 更新）
         self.on_error: Callable[[str], None] | None = None  # 出问题时通知（网页控制台、语音播报）
         self._heartbeat: asyncio.Task | None = None
+        # 动作宏“边做边学”：录制时，用户下令的 move/turn/barrel/fire/dance 按宏的写法记下来（任务自己下发的不记）
+        self.recorder: list[str] | None = None
 
     # ---- 生命周期 ----
     async def start(self):
@@ -207,6 +209,16 @@ class TankExecutor:
         await self._safe_halt()
         return "已停车"
 
+    def _record(self, step: str):
+        if self.recorder is None:
+            return
+        try:
+            in_mission = self._mission is not None and asyncio.current_task() is self._mission
+        except RuntimeError:  # 不在事件循环里
+            in_mission = False
+        if not in_mission:
+            self.recorder.append(step)
+
     def _speed(self, speed: int) -> int:
         return max(0, min(int(speed), self.max_speed))
 
@@ -215,6 +227,7 @@ class TankExecutor:
         kind = "forward" if sign > 0 else "other"
         ms = min(int(duration_ms), MAX_ACTION_MS)
         name = "前进" if sign > 0 else "后退"
+        self._record(f"{name} {ms}" + (f" 速度 {int(speed)}" if int(speed) != 80 else ""))
         if self.persona == "soldier":
             s = self._speed(100) * sign
             return self._enqueue(Action(f"{name} {ms}ms 速度{abs(s)}（特种兵）", ms, lambda: self._drive_for(s, s, ms), kind))
@@ -248,6 +261,7 @@ class TankExecutor:
         # 原地转向：两条履带反向，比单侧履带转快一倍、几乎不画弧
         left, right = (-s, s) if direction == "left" else (s, -s)
         name = "左转" if direction == "left" else "右转"
+        self._record(f"{name} {int(angle)}")
         deg = float(angle) if direction == "left" else -float(angle)
         return self._enqueue(Action(f"{name} {int(angle)}° {ms}ms", ms, lambda: self._drive_for(left, right, ms),
                                     "turn", deg))
@@ -256,6 +270,7 @@ class TankExecutor:
         sp = BARREL_UP_SPEED if direction == "up" else -BARREL_UP_SPEED
         ms = min(int(duration_ms), MAX_BARREL_MS)
         name = "炮管抬高" if direction == "up" else "炮管压低"
+        self._record(f"{'炮管抬' if direction == 'up' else '炮管压'} {ms}")
         return self._enqueue(Action(f"{name} {ms}ms", ms, lambda: self._barrel_for(sp, ms)))
 
     def fire(self, shots: int = 1) -> str:
@@ -263,6 +278,7 @@ class TankExecutor:
             raise PermissionError("发射功能已被锁定（启动参数 --no-fire）")
         n = max(1, min(int(shots), self.max_shots))
         ms = int(n * (self.fire_pulse_ms + self.fire_cooldown_s * 1000))
+        self._record(f"开火 {n}")
         return self._enqueue(Action(f"发射 {n} 发", ms, lambda: self._fire(n)))
 
     def dance(self) -> str:
@@ -274,6 +290,7 @@ class TankExecutor:
             await self._barrel_for(BARREL_UP_SPEED, 300)
             await self._barrel_for(-BARREL_UP_SPEED, 300)
 
+        self._record("跳舞")
         return self._enqueue(Action("跳舞", 2400, run))
 
     def set_persona(self, persona: str) -> str:

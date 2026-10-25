@@ -95,6 +95,48 @@ CAMERA_HOWTO = {
 }
 
 
+def register_macro_tools(mcp: McpServer, macros) -> None:
+    """macros 是 macros.Macros：语音编程，把一串动作起个名字记下来，以后一句话执行。"""
+    mcp.add_tool(
+        "self.macro.save",
+        "把一串动作记成一个名字（语音编程）。用户说“记住，巡逻就是前进两秒、左转 90 度，重复 4 次”时调用："
+        "name=巡逻，steps 每步一句、用分号隔开，只能用这些写法：前进 2000（毫秒，可加“速度 100”）、后退 1000、左转 90、右转 45、"
+        "炮管抬 300、炮管压 300、开火 1、跳舞、等待 500、情绪 开心（开心/生气/难过/惊讶/思考）、执行 别的动作名；"
+        "整套重复几遍写在 repeat。同名会覆盖。只有用户定义时明确说了开火，steps 里才能有开火。"
+        "返回报错时按提示改好再调一次。记住后用一句话告诉用户，不要马上执行。",
+        [Prop("name", "string", "这套动作的名字，例如“巡逻”"),
+         Prop("steps", "string", "例如“前进 2000；左转 90”"),
+         Prop("repeat", "integer", "整套重复几遍", default=1, minimum=1, maximum=10)],
+        macros.save,
+    )
+    mcp.add_tool(
+        "self.macro.run",
+        "执行一套记住的动作。用户说出记住的动作名（例如“巡逻”“来一段庆祝”“跑一遍胜利舞”）时调用，"
+        "repeat=0 表示按记住的遍数，用户说了“来三遍”就填 3。动作里如果有开火，是用户当初自己定义的，可以执行。"
+        "不知道有哪些动作时先调用 self.macro.list。",
+        [Prop("name", "string", "动作名"),
+         Prop("repeat", "integer", "执行几遍，0=按记住的", default=0, minimum=0, maximum=10)],
+        macros.run,
+    )
+    mcp.add_tool("self.macro.list", "列出记住的所有动作和它们的步骤。用户问“你会哪些动作/学过什么”时调用。", [], macros.list)
+    mcp.add_tool("self.macro.delete", "忘掉一套记住的动作。用户说“把巡逻忘了/删掉巡逻”时调用。",
+                 [Prop("name", "string", "动作名")], macros.delete)
+    mcp.add_tool(
+        "self.macro.record_start",
+        "开始“边做边学”：之后用户下的移动、转向、炮管、开火、跳舞指令照常执行，同时记下来。"
+        "用户说“开始学动作/我教你一套动作/看我怎么指挥”时调用。",
+        [],
+        macros.record_start,
+    )
+    mcp.add_tool(
+        "self.macro.record_stop",
+        "结束“边做边学”。用户说“记住这套叫胜利舞”时 name=胜利舞；说“不学了/算了”时 name 留空（不保存）。",
+        [Prop("name", "string", "动作名，留空=不保存", default=""),
+         Prop("repeat", "integer", "整套重复几遍", default=1, minimum=1, maximum=10)],
+        macros.record_stop,
+    )
+
+
 def register_wander_tool(mcp: McpServer, wanderer, camera: bool) -> None:
     """有摄像头时边看边逛；没有摄像头（或看不清）时闭着眼慢慢逛。两种都一直逛到用户说“停”。"""
     how = ("边走边看摄像头避开障碍物和死角，看不清画面时会自动改成慢慢地闭着眼逛，" if camera
