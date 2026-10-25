@@ -123,6 +123,9 @@ def explain(vision: dict, ident: Identity, jpeg: bytes, question: str, timeout: 
     return str(data.get("response", ""))
 
 
+SNAPSHOT_TIMEOUT_S = 10
+
+
 class PhotoTool:
     """self.camera.take_photo 的实现。最近一张照片留在 last_jpeg，方便网页控制台或调试查看。"""
 
@@ -145,7 +148,11 @@ class PhotoTool:
         if vision is None:
             raise RuntimeError("平台没有下发视觉接口：请在智控台「对话与视觉 → 视觉分析」开启视觉模型，保存后重连")
         t0 = time.monotonic()
-        jpeg = await asyncio.to_thread(self.camera.snapshot)
+        try:
+            jpeg = await asyncio.wait_for(asyncio.to_thread(self.camera.snapshot), SNAPSHOT_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"拍照超过 {SNAPSHOT_TIMEOUT_S} 秒没拿到画面：摄像头可能被别的程序占用，"
+                               "或手机连续互通相机断开了") from None
         answer = await asyncio.to_thread(explain, vision, self.ident, jpeg, question)
         self.last_jpeg, self.last_answer = jpeg, answer
         print(f"📷 {question} → {answer}（{time.monotonic() - t0:.1f}s）")

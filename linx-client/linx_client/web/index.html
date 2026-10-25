@@ -270,7 +270,7 @@ function setStatus(s) {
     ? `在线 · ${l.latency_ms ?? "?"}ms` + (l.uptime_s != null ? ` · 开机 ${Math.round(l.uptime_s / 60)} 分钟` : "") : "未知";
   el.style.color = l && l.online === false ? "var(--bad)" : "";
   el.title = l ? `${l.link || l.error || ""}（${l.checked_at || ""} 检查）` : "";
-  $("s-current").textContent = s.current || "空闲";
+  $("s-current").textContent = [s.mission && `任务：${s.mission}`, s.current].filter(Boolean).join(" · ") || "空闲";
   $("s-queued").textContent = s.queued.length ? s.queued.join("、") : "0";
   $("s-speed").textContent = s.max_speed + "%";
   $("s-fire").textContent = s.fire_enabled ? `可用 · 已发 ${s.shots_fired}` : "已锁定";

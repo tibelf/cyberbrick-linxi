@@ -210,3 +210,24 @@ def test_no_emote_during_mission():
         await tank.close()
 
     asyncio.run(main())
+
+
+def test_mission_error_is_reported_not_silent():
+    async def main():
+        be = MockBackend(verbose=False)
+        tank = TankExecutor(be)
+        errors = []
+        tank.on_error = errors.append
+        await tank.start()
+
+        async def broken(q):
+            raise RuntimeError("平台没有下发视觉接口")
+
+        Seeker(tank, broken)("绿色瓶子", "approach", False)
+        while tank.status()["mission"]:
+            await asyncio.sleep(0.02)
+        await tank.close()
+        assert errors and "走到绿色瓶子" in errors[0] and "视觉接口" in errors[0]
+        assert tank.status()["last_error"]
+
+    asyncio.run(main())

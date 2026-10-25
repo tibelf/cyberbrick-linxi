@@ -159,9 +159,21 @@ class TankExecutor:
             if self._current and not self._current.done():
                 self._current.cancel()  # 被取消的动作会在 finally 里 halt
         self._mission_desc = desc
-        self._mission = asyncio.create_task(run())
-        self._mission.add_done_callback(lambda t: t.cancelled() or t.exception())  # 吞掉未取出的异常警告
+        self._mission = asyncio.create_task(self._guard_mission(desc, run))
         return f"开始：{desc}" + (f"（已停止之前的「{replaced}」）" if replaced else "")
+
+    async def _guard_mission(self, desc: str, run: Callable[[], Awaitable[None]]):
+        """任务出错（拍照失败、视觉接口超时等）不能悄悄结束：停车，并像动作失败一样报告出来。"""
+        try:
+            await run()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            self._queue.clear()
+            if self._current and not self._current.done():
+                self._current.cancel()
+            await self._safe_halt()
+            self._report(f"「{desc}」中断了：{e}")
 
     @property
     def queued(self) -> int:
