@@ -110,6 +110,18 @@ def register_wander_tool(mcp: McpServer, wanderer, camera: bool) -> None:
     )
 
 
+def register_map_tools(mcp: McpServer, builder) -> None:
+    """builder 是 navigate.MapBuilder；--marker 时注册。"""
+    mcp.add_tool(
+        "self.map.build",
+        "拍一张俯视照片给场地建地图：标出障碍物（箱子、椅子腿、墙等），之后小车去哪里、闲逛时都会沿着绕开障碍物的路线走，"
+        "不会乱碰东西。地上要平放着锚点标记，照片里要能看到它。用户说“拍一张地图/建个地图/看看场地/重新拍地图/东西挪过了”时调用，"
+        "然后把返回的结果用一句话告诉用户（地图多大、有哪些障碍物）。",
+        [],
+        builder,
+    )
+
+
 def register_camera_tools(mcp: McpServer, photo, view: str = "overhead", seeker=None, wanderer=None) -> None:
     """photo 是 camera.PhotoTool；只有启动时指定了 --camera 才注册。view 决定怎么教大模型看图。
     seeker 是 seek.Seeker：本地闭环寻的，大模型调用一次，小车自己边看边调。"""

@@ -238,14 +238,15 @@ class PhotoTool:
         # 与小智设备一致：把视觉接口的结果原样交给平台
         return json.dumps({"success": True, "action": "RESPONSE", "response": answer}, ensure_ascii=False)
 
-    async def ask(self, question: str) -> str:
-        """拍一张并返回视觉模型的回答（闭环寻的也用它）。"""
+    async def ask(self, question: str, frame=None) -> str:
+        """拍一张并返回视觉模型的回答（闭环寻的也用它）。frame：分析指定的这一帧（建地图时要和算坐标的是同一张）。"""
         vision = self.mcp.vision
         if vision is None:
             raise RuntimeError("平台没有下发视觉接口：请在智控台「对话与视觉 → 视觉分析」开启视觉模型，保存后重连")
         t0 = time.monotonic()
         try:
-            jpeg = await asyncio.wait_for(asyncio.to_thread(self.camera.snapshot), SNAPSHOT_TIMEOUT_S)
+            grab = (lambda: _encode(frame)) if frame is not None else self.camera.snapshot
+            jpeg = await asyncio.wait_for(asyncio.to_thread(grab), SNAPSHOT_TIMEOUT_S)
         except asyncio.TimeoutError:
             raise RuntimeError(f"拍照超过 {SNAPSHOT_TIMEOUT_S} 秒没拿到画面：摄像头可能被别的程序占用，"
                                "或手机连续互通相机断开了") from None

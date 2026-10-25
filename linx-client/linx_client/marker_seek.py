@@ -11,6 +11,7 @@
 """
 
 import asyncio
+import statistics
 import time
 from typing import Awaitable, Callable
 
@@ -33,7 +34,7 @@ LOST_S = 8.0
 NO_MARKER_FALLBACK_S = 2.0  # 一开始这么久都看不到车顶标记，就改用视觉模型版
 TIME_LIMIT_S = 120.0
 PUBLISH_S = 1.0  # 网页控制台每秒刷新一张调试图
-KNOCKED_TILT_DEG = 40.0
+KNOCKED_TILT_DEG = 30.0  # 目标标记倾角变化超过这么多算倒了（立着时测出来只差几度；倒下后有的角度只测出约 40°）
 # 往前开着（偏角不大）却越开越远：车顶标记贴反了（箭头朝车尾），程序以为的车头其实是车尾
 REVERSE_CHECK_S = 0.3  # 至少隔这么久的两次观测
 REVERSE_CM = 6.0  # 距离变大超过 max(这么多, 10%) 才算（手持时距离会有几厘米的抖动）
@@ -44,7 +45,8 @@ Say = Callable[[str], Awaitable[None]]
 class MarkerSeeker:
     def __init__(self, tank: TankExecutor, camera, tracker: MarkerTracker | None = None,
                  labels: dict[int, str] | None = None, ask=None, say: Say | None = None, fallback=None,
-                 on_photo=None, time_limit_s: float = TIME_LIMIT_S, lost_s: float = LOST_S, loop_s: float = LOOP_S):
+                 on_photo=None, time_limit_s: float = TIME_LIMIT_S, lost_s: float = LOST_S, loop_s: float = LOOP_S,
+                 navigator=None):
         self.tank = tank
         self.camera = camera
         self.tracker = tracker or MarkerTracker()
@@ -57,6 +59,7 @@ class MarkerSeeker:
         self.lost_s = lost_s
         self.loop_s = loop_s
         self._last_pub = 0.0
+        self.navigator = navigator  # navigate.Navigator：有地图时先沿地图路线绕开障碍物开到目标附近
 
     def __call__(self, target: str, goal: str = "approach", fire: bool = False) -> str:
         desc = f"{GOALS.get(goal, '走到')}{target}" + ("并开火" if fire else "")
@@ -65,7 +68,11 @@ class MarkerSeeker:
 
     async def run(self, target: str, goal: str, fire: bool) -> str:
         spec = resolve_target(target, self.labels)
-        r = await self._loop(target, spec, goal)
+        r = "direct"
+        if self.navigator and self.navigator.map and goal != "aim":
+            r = await self._via_map(target, spec, goal)
+        if r == "direct":
+            r = await self._loop(target, spec, goal)
         if r is None:  # 没贴标记：退回视觉模型版，同一个任务里接着跑
             print("🔁 看不到车顶标记（或目标没有标记、也说不出颜色），改用视觉模型估位置")
             return await self.fallback.run(target, goal, fire)
@@ -81,6 +88,53 @@ class MarkerSeeker:
         if self.say:
             await self.say(result)
         return result
+
+    # ---- 有地图：先绕开障碍物开到附近 ----
+    async def _via_map(self, target: str, spec: Target, goal: str):
+        """返回 (是否完成, 播报)，或 "direct"（交给 _loop 做最后一段：贴近、撞）。"""
+        nav = self.navigator
+        v = await nav.look()
+        if v is None:
+            print(f"[map] 看不到地上的 {nav.anchor_id} 号锚点，这次不用地图")
+            return "direct"
+        tracked = True  # 最后一段能不能靠标记/颜色盯着目标
+        xy = None
+        if spec.kind == "marker":
+            xy = v.markers.get(spec.marker_id)
+        if xy is None:
+            ob = nav.map.find(target)
+            if ob is not None:
+                xy, tracked = (ob.x, ob.y), spec.kind in ("marker", "color")
+        if xy is None and spec.kind == "color":
+            px = self.tracker._color_blob(nav._last_frame, spec.color, [])
+            xy = px and v.floor_point(px)
+        if xy is None and spec.kind == "any_marker":
+            ids = [i for i in v.markers if i != 0]
+            xy = v.markers[ids[0]] if len(ids) == 1 else None
+        if xy is None:
+            print(f"[map] 地图上找不到{target}，直接看着它开")
+            return "direct"
+        ok, msg = await nav.goto(xy, stop_cm=RAM_ZONE_CM + 2)
+        if not ok:
+            return False, f"没能开到{target}附近：{msg}"
+        if tracked:
+            return "direct"
+        # 目标只在地图上有（视觉模型认出来的障碍物，没贴标记）：转过去，approach 就算到了，hit 就冲上去
+        await nav.face(xy)
+        if goal == "approach":
+            return True, f"已走到{target}跟前"
+        for _ in range(MAX_RAMS):
+            await self._ram()
+            if not self.ask:
+                return True, f"已经撞上{target}了（没开视觉分析，看不出倒没倒）"
+            try:
+                yes = parse_yes_no(await self.ask(f"画面里的{target}是不是已经倒下、被撞翻或被撞开了？只回答“是”或“否”，不要解释。"))
+            except Exception:  # noqa: BLE001
+                return True, f"已经撞上{target}了"
+            if yes:
+                return True, f"已把{target}撞倒了"
+            await nav.face(xy)
+        return False, f"撞了 {MAX_RAMS} 次，{target}还没倒"
 
     # ---- 看 ----
     async def _look(self, spec: Target) -> Sighting:
@@ -119,16 +173,22 @@ class MarkerSeeker:
                     return yes
             except Exception as e:  # noqa: BLE001 — 没开视觉分析等：用标记自己判断
                 print(f"[marker-seek] 视觉确认失败，改用标记判断：{e}")
-        for _ in range(5):
+        tilts, dists, missing = [], [], 0
+        for _ in range(5):  # 看几帧取中位数，单帧测的倾角可能偏
             s = await self._look(spec)
             if s.car:
                 if not s.target:
-                    return True  # 目标不见了（倒下后标记朝下，或被撞出画面）
-                if before.target_tilt is not None and s.target_tilt is not None:
-                    return abs(s.target_tilt - before.target_tilt) > KNOCKED_TILT_DEG
-                return s.distance > before.distance + 10  # 颜色目标：被撞远了
+                    missing += 1
+                else:
+                    dists.append(s.distance)
+                    if s.target_tilt is not None:
+                        tilts.append(s.target_tilt)
             await asyncio.sleep(self.loop_s)
-        return False
+        if missing >= 3:
+            return True  # 目标不见了（倒下后标记朝下，或被撞出画面）
+        if tilts and before.target_tilt is not None:
+            return abs(statistics.median(tilts) - before.target_tilt) > KNOCKED_TILT_DEG
+        return bool(dists) and statistics.median(dists) > before.distance + 10  # 颜色目标：被撞远了
 
     # ---- 主循环 ----
     async def _loop(self, target: str, spec: Target, goal: str):
@@ -187,7 +247,9 @@ class MarkerSeeker:
                     if rams >= MAX_RAMS:
                         return False, f"撞了 {rams} 次，{target}还没倒"
                     continue
-                if abs(b) > PIVOT_DEG:
+                # 要撞的目标近在眼前时必须先对正再走：斜着往前蹭会从目标旁边擦过去
+                pivot = RAM_ALIGN_DEG if goal == "hit" and d <= RAM_ZONE_CM * 1.5 else PIVOT_DEG
+                if abs(b) > pivot:
                     fwd_since = None
                     await self._turn(b)
                     continue

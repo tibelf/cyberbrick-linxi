@@ -19,6 +19,7 @@ from dataclasses import dataclass
 DICT_NAME = "DICT_4X4_50"
 CAR_ID = 0
 TARGET_IDS = range(1, 10)
+ANCHOR_ID = 3  # 平放在地上的锚点标记（地图的原点）；打印纸上 0–3 号，默认拿 3 号当锚点
 MARKER_CM = 6.0  # 打印出来的黑色方块边长
 CAR_HEIGHT_CM = 7.0  # 车顶标记离地高度（Mini T 车顶大约这么高）
 FOCAL_RATIO = 0.8
@@ -91,6 +92,31 @@ class Sighting:
     target_px: tuple | None = None  # 颜色目标的贴地点（像素）
 
 
+@dataclass
+class AnchorView:
+    """一帧画面里以锚点为原点的位置（厘米）。car = (x, y, 车头朝向弧度，逆时针为正)。"""
+    K: object
+    R: object
+    t: object
+    corners: dict
+    car: tuple | None = None
+    markers: dict = None
+
+    def __post_init__(self):
+        self.markers = self.markers or {}
+
+    def floor_point(self, px) -> tuple | None:
+        """像素点 → 地面上的位置（锚点坐标系，z=0 平面求交）。"""
+        import numpy as np
+
+        d = self.R.T @ (np.linalg.inv(self.K) @ np.array([px[0], px[1], 1.0]))
+        o = -self.R.T @ self.t  # 摄像头在锚点坐标系里的位置
+        if abs(d[2]) < 1e-9 or -o[2] / d[2] <= 0:
+            return None
+        s = -o[2] / d[2]
+        return float(o[0] + s * d[0]), float(o[1] + s * d[1])
+
+
 class MarkerTracker:
     def __init__(self, marker_cm: float = MARKER_CM, car_height_cm: float = CAR_HEIGHT_CM,
                  focal_ratio: float = FOCAL_RATIO):
@@ -100,6 +126,7 @@ class MarkerTracker:
         self.car_height_cm = car_height_cm
         self.focal_ratio = focal_ratio
         self.flip = False  # 车顶标记贴反了（箭头朝车尾）：闭环任务发现“往前开却越开越远”时会把它设为 True
+        self.anchor_id: int | None = None  # 开了地图时的锚点号：它不算目标
         dictionary = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, DICT_NAME))
         params = cv2.aruco.DetectorParameters()
         params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
@@ -191,7 +218,7 @@ class MarkerTracker:
         else:
             mid = target.marker_id
             if mid is None:  # any_marker：画面里正好一个目标标记才用它，有好几个时不瞎猜
-                ids = [i for i in found if i in TARGET_IDS]
+                ids = [i for i in found if i in TARGET_IDS and i != self.anchor_id]
                 mid = ids[0] if len(ids) == 1 else None
             if mid is not None and mid in found:
                 tp = self._pose(found[mid], K)
@@ -209,6 +236,36 @@ class MarkerTracker:
             s.bearing = math.degrees(math.atan2(-xy[0], xy[1]))
             s.distance = math.hypot(*xy)
         return s
+
+    def anchor_view(self, frame, anchor_id: int) -> "AnchorView | None":
+        """以地上的锚点标记为原点（x 右、y 标记上方、z 向上，厘米）：车在哪、车头朝哪、各个目标标记在哪。
+        锚点不动，所以手拿着摄像头动来动去，算出来的位置也不变——地图模式靠它。看不到锚点返回 None。"""
+        np = self.np
+        found = self.detect(frame)
+        if anchor_id not in found:
+            return None
+        K = self.camera_matrix(frame.shape[1], frame.shape[0])
+        pa = self._pose(found[anchor_id], K)
+        if pa is None:
+            return None
+        Ra, ta = pa
+        v = AnchorView(K=K, R=Ra, t=ta, corners=found)
+        for mid, c in found.items():
+            if mid == anchor_id:
+                continue
+            p = self._pose(c, K)
+            if p is None:
+                continue
+            Rm, tm = p
+            w = Ra.T @ (tm - ta)
+            if mid == CAR_ID:
+                f = Ra.T @ Rm[:, 1]  # 车头方向
+                if self.flip:
+                    f = -f
+                v.car = (float(w[0]), float(w[1]), math.atan2(float(f[1]), float(f[0])))
+            else:
+                v.markers[mid] = (float(w[0]), float(w[1]))
+        return v
 
     def annotate(self, frame, s: Sighting):
         """调试图：框出标记，画车到目标的连线，写上方位和距离。"""
@@ -255,7 +312,9 @@ def marker_svg(size_cm: float = MARKER_CM, target_ids=(1, 2, 3)) -> str:
     mm = size_cm * 10
     cell = mm / 6
     gap = 15  # 标记之间留白，四周的白边是识别必需的；整页要放进 A4 的可打印区域（约 190×277mm），否则浏览器会缩小
-    items = [(CAR_ID, "0 号 · 贴车顶", "箭头朝车头")] + [(i, f"{i} 号 · 贴目标", "") for i in target_ids]
+    items = [(CAR_ID, "0 号 · 贴车顶", "箭头朝车头")] + [
+        (i, f"{i} 号 · 地图锚点", "平放在地上，别动它") if i == ANCHOR_ID else (i, f"{i} 号 · 贴目标", "")
+        for i in target_ids]
     cols = 2 if gap + 2 * (mm + gap) <= 185 else 1
     rows = (len(items) + cols - 1) // cols
     pitch_x, pitch_y = mm + gap, mm + gap + 10

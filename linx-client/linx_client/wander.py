@@ -40,7 +40,8 @@ MAX_BLIND = 3  # 连续看不清几次就改成闭眼慢逛
 BLIND_SPEED = 60  # 闭眼慢逛：速度低一点，撞到也不疼（再低履带带不动）
 BLIND_SEG_MS = (500, 1100)  # 走短段，经常换方向，不会一头扎进角落里
 BLIND_TURN = 0.5  # 每段之前转个向的概率
-BLIND_RETRY_S = 4.0  # 闭眼时每隔这么久在后台试一次摄像头
+BLIND_RETRY_S = 4.0
+MAP_RETRY_S = 15.0  # 地图模式看不到锚点后，隔这么久再试  # 闭眼时每隔这么久在后台试一次摄像头
 
 DIRS = {  # 画面方向（x 向右，y 向下）
     "上": (0, -1), "下": (0, 1), "左": (-1, 0), "右": (1, 0),
@@ -99,6 +100,8 @@ class Wanderer:
         self.seg_ms = seg_ms
         self.probe_ms = probe_ms
         self.look_gap_s = look_gap_s
+        self.navigator = None  # navigate.Navigator：有地图时在地图上随机挑空地、沿安全路线逛
+        self._map_retry_at = 0.0  # 看不到锚点时，过一会儿再试地图模式
         self._reset()
 
     def __call__(self) -> str:
@@ -166,6 +169,23 @@ class Wanderer:
             return None
         return rotate(self.heading, self.tank.turn_total - self.heading_tt)
 
+    # ---- 有地图：在地图上逛 ----
+    async def _map_roam_once(self) -> bool:
+        """在地图上随便挑一块能到的空地，沿绕开障碍物的路线开过去。看不到锚点/车时返回 False，交回看图模式。"""
+        nav = self.navigator
+        start = nav.car[:2] if nav.car else None
+        goal = nav.map.random_free_point(self.rng, near=start, min_cm=40)
+        if goal is None:
+            return False
+        ok, msg = await nav.goto(goal, stop_cm=12, time_limit_s=30)
+        if not ok:
+            print(f"[wander] 地图上这一段没走成：{msg}")
+            if "看不到" in msg:
+                return False
+        if self.rng.random() < FLOURISH * 2:
+            await self._flourish()
+        return True
+
     # ---- 闭眼慢逛 ----
     async def _blind_step(self):
         if self.tank.queued:
@@ -219,6 +239,10 @@ class Wanderer:
             await self._run_blind()  # 没有摄像头时永远不会返回
         while True:
             await self._wait_if_paused()
+            if self.navigator and self.navigator.map and time.monotonic() >= self._map_retry_at:
+                if await self._map_roam_once():
+                    continue  # 有地图：按地图逛
+                self._map_retry_at = time.monotonic() + MAP_RETRY_S  # 看不到锚点：先用看图模式逛一会儿
             wait = self.look_gap_s - (time.monotonic() - last_look)
             if wait > 0:
                 await asyncio.sleep(wait)

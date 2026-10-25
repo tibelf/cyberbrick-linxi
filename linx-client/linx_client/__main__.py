@@ -222,12 +222,22 @@ async def _run(args):
                             paused=lambda: session.ws is None)
         if args.marker:
             from .marker_seek import MarkerSeeker
+            from .navigate import MapBuilder, Navigator
+            from .tools import register_map_tools
 
+            tracker = _make_tracker(args)
+            tracker.anchor_id = args.anchor_id
+            publish = lambda *a: photo.on_photo and photo.on_photo(*a)  # noqa: E731
+            # 地图：地上平放锚点标记，说“拍一张地图”后，去哪、闲逛都沿绕开障碍物的路线走
+            navigator = Navigator(tank, photo.camera, tracker, args.anchor_id, on_photo=publish)
+            register_map_tools(mcp, MapBuilder(navigator, ask=photo.ask))
+            wanderer.navigator = navigator
             # 有标记就看标记边开边调；没贴标记时 MarkerSeeker 会退回上面的视觉模型版 seeker
-            seeker = MarkerSeeker(tank, photo.camera, _make_tracker(args), labels=_marker_labels(args),
+            seeker = MarkerSeeker(tank, photo.camera, tracker, labels=_marker_labels(args),
                                   ask=photo.ask, say=lambda text: session.say(text), fallback=seeker,
-                                  on_photo=lambda *a: photo.on_photo and photo.on_photo(*a))
-            print("🔳 标记跟踪：车顶 0 号标记，目标 " + (args.marker_targets or "1–9 号标记或颜色"))
+                                  on_photo=publish, navigator=navigator)
+            print("🔳 标记跟踪：车顶 0 号标记，目标 " + (args.marker_targets or "1–9 号标记或颜色")
+                  + f"；地图锚点 {args.anchor_id} 号（平放在地上，说“拍一张地图”建图）")
         register_camera_tools(mcp, photo, view=args.camera_view, seeker=seeker, wanderer=wanderer)
         print(f"📷 摄像头：{args.camera}（需在智控台开启视觉分析）")
     else:
@@ -310,6 +320,7 @@ def _add_marker_args(p):
     p.add_argument("--marker-targets", help="目标标记叫什么，例如 “1=绿色瓶子,2=红色盒子”；没登记的目标按颜色认")
     p.add_argument("--car-height-cm", type=float, default=7.0, help="车顶标记离地高度（厘米）")
     p.add_argument("--focal-ratio", type=float, default=0.8, help="摄像头焦距 ÷ 画面宽度（不标定时的估计值）")
+    p.add_argument("--anchor-id", type=int, default=3, help="平放在地上当地图原点的标记号（它不算目标）")
 
 
 def _make_tracker(args):
@@ -357,6 +368,26 @@ def cmd_marker_test(args):
         print()
 
 
+def cmd_map_test(args):
+    """拍一张建地图，存成图片看看（不连平台、不动车；没有视觉模型，只按颜色判断障碍物）。"""
+    from .camera import make_camera
+    from .floormap import build_map
+
+    cam, tracker = make_camera(args.camera), _make_tracker(args)
+    tracker.anchor_id = args.anchor_id
+    frame = cam.frame()
+    fm = build_map(frame, tracker, args.anchor_id)
+    v = tracker.anchor_view(frame, args.anchor_id)
+    import cv2
+
+    cv2.imwrite(args.out, fm.render(car=v.car if v else None))
+    w, h = fm.size_cm
+    print(f"🗺  地图 {w / 100:.1f}×{h / 100:.1f} 米，障碍物 {len(fm.obstacles)} 个："
+          + "；".join(f"({o.x:.0f}, {o.y:.0f}) cm 约 {o.area_cm2:.0f} cm²" for o in fm.obstacles))
+    print(f"   车：{'(%.0f, %.0f) cm' % v.car[:2] if v and v.car else '看不到车顶标记'}；图存到 {args.out}"
+          "（红 = 障碍物，浅红 = 车身过不去，深灰 = 看不到的地方，黄框 = 锚点，蓝圈 = 车）")
+
+
 def main():
     ap = argparse.ArgumentParser(prog="linx_client", description="把电脑模拟成灵矽设备，语音控制 CyberBrick 小车")
     ap.add_argument("--state", default=".linx_device.json", help="虚拟设备身份文件")
@@ -396,6 +427,11 @@ def main():
     p_mt.add_argument("--target", default="1号", help="要找的目标，如 “1号”“绿色瓶子”")
     p_mt.add_argument("--out", default="marker-test.jpg", help="每秒存一张标注图")
     _add_marker_args(p_mt)
+
+    p_map = sub.add_parser("map-test", help="拍一张建俯视地图存成图片（不连平台、不动车）")
+    p_map.add_argument("--camera", default="0", help="同 run --camera")
+    p_map.add_argument("--out", default="map-test.png")
+    _add_marker_args(p_map)
 
     p_cam = sub.add_parser("camera-test", help="拍一张照片存成文件，检查摄像头（不连平台）")
     p_cam.add_argument("--camera", default="0", help="同 run --camera")
@@ -445,6 +481,8 @@ def main():
         print(f"🔳 已生成 {args.out}：用浏览器打开，打印时选“实际大小/100%”。0 号贴车顶、箭头朝车头；1–3 号贴目标")
     elif args.cmd == "marker-test":
         cmd_marker_test(args)
+    elif args.cmd == "map-test":
+        cmd_map_test(args)
     elif args.cmd == "car-exec":
         cmd_car_exec(args)
     elif args.cmd == "wifi-setup":
