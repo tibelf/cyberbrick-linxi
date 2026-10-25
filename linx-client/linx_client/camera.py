@@ -13,6 +13,7 @@
 
 import asyncio
 import json
+import re
 import threading
 import time
 import urllib.request
@@ -60,8 +61,13 @@ class OpenCVCamera:
     WARMUP_S = 1.0
     STALE_S = 2.0  # 最新一帧超过这么久没更新，说明摄像头断了（手机连续互通相机断开等）
 
-    def __init__(self, index: int = 0):
+    # 手机/网络摄像头的传感器大多是 4:3，要 16:9 会把上下裁掉、视野变窄（2026-10-25 用户反馈“视角太小”），
+    # 所以先要 4:3 的大分辨率，摄像头不支持再退到 1080p
+    SIZES = [(1920, 1440), (1440, 1080), (1920, 1080), (1280, 720)]
+
+    def __init__(self, index: int = 0, size: tuple[int, int] | None = None):
         self.index = index
+        self.size = size  # 指定分辨率（--camera 0:1920x1440）；None = 自动挑
         self._cap = None
         self._latest = None  # (frame, time)
         self._lock = threading.Lock()
@@ -76,10 +82,9 @@ class OpenCVCamera:
                 raise RuntimeError(f"打不开摄像头 {self.index}（macOS 需在「隐私与安全性 → 摄像头」里允许终端）")
             # 默认常常只给 640×480：车顶标记斜着拍时只剩十几个像素，解不出来（2026-10-25 用户实测
             # “要么看不到 0 号、要么看不到 1 号”）。要最高 1080p，拿到多少用多少；上传视觉模型前会再缩小
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-            w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            print(f"📷 摄像头 {self.index}：{w}×{h}" + ("（分辨率偏低，标记要拍近一点）" if w < 1280 else ""))
+            w, h = self._pick_size(cap)
+            print(f"📷 摄像头 {self.index}：{w}×{h}" + ("（分辨率偏低，标记要拍近一点）" if w < 1280 else "")
+                  + ("（16:9 会裁掉上下，视野偏窄；可以试试 --camera %d:1920x1440）" % self.index if w / h > 1.5 else ""))
             self._cap = cap
             threading.Thread(target=self._reader, daemon=True).start()
         t0 = time.monotonic()
@@ -87,6 +92,25 @@ class OpenCVCamera:
             if time.monotonic() - t0 > 5:
                 raise RuntimeError(f"摄像头 {self.index} 读不到画面")
             time.sleep(0.05)
+
+    def _pick_size(self, cap) -> tuple[int, int]:
+        """依次试几种分辨率，挑宽度够（≥1280）里画面最高的（上下视野最大），拿不到就用摄像头给的。"""
+        cv2 = _cv2()
+
+        def try_size(w, h):
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+            return int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        if self.size:
+            return try_size(*self.size)
+        got = {}
+        for want in self.SIZES:
+            actual = try_size(*want)
+            got.setdefault(actual, want)
+        ok = [a for a in got if a[0] >= 1280] or list(got)
+        best = max(ok, key=lambda a: (a[1], a[0]))
+        return try_size(*got[best])
 
     def _reader(self):
         while self._cap is not None:
@@ -156,6 +180,9 @@ def make_camera(spec: str | None) -> Camera | None:
         return None
     if spec.isdigit():
         return OpenCVCamera(int(spec))
+    m = re.fullmatch(r"(\d+):(\d+)[x×](\d+)", spec)  # 0:1920x1440 = 指定分辨率
+    if m:
+        return OpenCVCamera(int(m.group(1)), (int(m.group(2)), int(m.group(3))))
     if spec.startswith(("http://", "https://")):
         return HttpSnapshotCamera(spec)
     return FileCamera(spec)

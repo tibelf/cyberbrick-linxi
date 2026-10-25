@@ -211,18 +211,21 @@ class MarkerTracker:
         """调试图：框出标记，画车到目标的连线，写上方位和距离。"""
         cv2, np = self.cv2, self.np
         img = frame.copy()
+        k = max(1.0, img.shape[1] / 640)  # 存图时会缩到 640 宽，字和线按比例放大，缩完还看得清
         for mid, c in (s.corners or {}).items():
             pts = c.astype(np.int32)
             color = (0, 200, 0) if mid == CAR_ID else (0, 140, 255)
-            cv2.polylines(img, [pts], True, color, 2)
-            cv2.putText(img, "CAR" if mid == CAR_ID else str(mid), tuple(pts[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+            cv2.polylines(img, [pts], True, color, int(2 * k))
+            cv2.putText(img, "CAR" if mid == CAR_ID else str(mid), tuple(pts[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.6 * k, color,
+                        int(2 * k))
         if s.target_px:
-            cv2.circle(img, (int(s.target_px[0]), int(s.target_px[1])), 6, (0, 140, 255), -1)
+            cv2.circle(img, (int(s.target_px[0]), int(s.target_px[1])), int(6 * k), (0, 140, 255), -1)
         if s.car and s.target:
             text = f"{'L' if s.bearing > 0 else 'R'} {abs(s.bearing):.0f}deg  {s.distance:.0f}cm"
         else:
             text = "no car marker" if not s.car else "no target"
-        cv2.putText(img, text, (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        cv2.rectangle(img, (0, 0), (int(330 * k), int(40 * k)), (255, 255, 255), -1)
+        cv2.putText(img, text, (int(10 * k), int(28 * k)), cv2.FONT_HERSHEY_SIMPLEX, 0.8 * k, (0, 0, 255), int(2 * k))
         return img
 
 

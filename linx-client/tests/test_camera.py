@@ -126,3 +126,33 @@ def test_camera_view_changes_tool_description():
         register_camera_tools(mcp, lambda question: "", view=view)
         desc = mcp.tools["self.camera.take_photo"].description
         assert CAMERA_HOWTO[view] in desc and key in desc and "开火" in desc
+
+
+def test_make_camera_with_size():
+    cam = make_camera("1:1920x1440")
+    assert isinstance(cam, OpenCVCamera) and cam.index == 1 and cam.size == (1920, 1440)
+
+
+def test_pick_size_prefers_full_4_3_frame():
+    """要 16:9 会裁掉上下（用户反馈视角太小）：摄像头支持 4:3 大分辨率时优先用它。"""
+    pytest.importorskip("cv2")
+    import cv2
+
+    class FakeCap:
+        def __init__(self, supported):
+            self.supported, self.cur, self.want = supported, supported[-1], [0, 0]
+
+        def set(self, prop, v):
+            self.want[0 if prop == cv2.CAP_PROP_FRAME_WIDTH else 1] = v
+            fit = [s for s in self.supported if s[0] <= self.want[0] and s[1] <= self.want[1]]
+            self.cur = max(fit, key=lambda s: s[0] * s[1]) if fit else self.supported[-1]
+
+        def get(self, prop):
+            return self.cur[0 if prop == cv2.CAP_PROP_FRAME_WIDTH else 1]
+
+    iphone = FakeCap([(1920, 1440), (1920, 1080), (1280, 720), (640, 480)])
+    assert OpenCVCamera(0)._pick_size(iphone) == (1920, 1440)
+    webcam = FakeCap([(1920, 1080), (1280, 720), (640, 480)])
+    assert OpenCVCamera(0)._pick_size(webcam) == (1920, 1080)
+    old = FakeCap([(640, 480)])
+    assert OpenCVCamera(0)._pick_size(old) == (640, 480)

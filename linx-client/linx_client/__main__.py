@@ -370,7 +370,7 @@ def main():
     p_run.add_argument("--no-mood", action="store_true", help="关闭情绪肢体语言（回复时的小动作和车灯）")
     p_run.add_argument("--web", action="store_true", help="同时打开网页控制台（对话记录、急停、按住说话、手动控车）")
     p_run.add_argument("--web-port", type=int, default=8080, help="网页控制台端口")
-    p_run.add_argument("--camera", help="开启拍照工具：0=电脑摄像头序号，http://…=JPEG 快照地址，其他=图片文件")
+    p_run.add_argument("--camera", help="开启拍照工具：0=电脑摄像头序号（0:1920x1440 = 指定分辨率），http://…=JPEG 快照地址，其他=图片文件")
     p_run.add_argument("--camera-view", choices=["overhead", "front"], default="overhead",
                        help="overhead=摄像头固定在场地旁边（俯拍或斜拍，越高越好），front=摄像头装在车上朝前")
 
