@@ -40,7 +40,7 @@ CAR_NAMES = ("坦克", "小车", "小坦克", "车")
 def question(target: str | None = None) -> str:
     want = f"其中“{target}”一定要列出来，名字就写“{target}”。" if target else ""
     return ("这是从正上方往下俯拍的地面照片，里面有一辆履带小坦克。用百分比坐标（左上角 0,0，右下角 100,100）回答，"
-            "只输出一行，不要解释：坦克=左,上,右,下；车头=上/下/左/右/左上/右上/左下/右下 之一（炮管指向画面哪边）；"
+            "只输出一行，不要解释：坦克=左,上,右,下（外框紧贴车身，不要留空白）；车头=上/下/左/右/左上/右上/左下/右下 之一（炮管指向画面哪边）；"
             "炮管尖=x,y；然后列出地面上会挡住小坦克的东西"
             "（箱子、椅子腿、桌腿、瓶子、墙、家具等；地垫、地毯、地板花纹、纸片、影子不算），"
             f"每个写成 名字=左,上,右,下。{want}"
@@ -50,6 +50,19 @@ def question(target: str | None = None) -> str:
 # 画面方向 → 角度（x 向右、y 向上，逆时针为正）
 DIRECTIONS = {"右上": 45, "左上": 135, "左下": -135, "右下": -45, "右": 0, "上": 90, "左": 180, "下": -90}
 _DIR = re.compile(r"车头(?:朝向)?\s*[=:：]\s*(左上|右上|左下|右下|上|下|左|右)")
+
+
+_FILLER = ("车头", "正对着", "对准", "对着", "朝着", "朝向", "面对", "面向", "朝", "向")
+
+
+def names_match(name: str, said: str) -> bool:
+    """视觉模型起的名字和用户的说法是不是同一个东西：“黑色垃圾桶” ~ “对着垃圾桶”“垃圾桶”。"""
+    if not name or not said:
+        return False
+    for w in _FILLER:
+        said = said.replace(w, "")
+    said = said.strip(" ，,。的")
+    return bool(said) and (said in name or name in said)
 
 
 def direction_deg(text: str) -> float | None:
@@ -88,7 +101,8 @@ def parse_answer(answer: str):
 class BlindMap:
     """视觉模型的回答 → 以厘米为单位的地图（x 向右、y 向上，原点在照片左下角）+ 车的位置估计。"""
 
-    def __init__(self, w_px: int, h_px: int, answer: str, facing: str = "auto", image=None, user_facing: str = ""):
+    def __init__(self, w_px: int, h_px: int, answer: str, facing: str = "auto", image=None, user_facing: str = "",
+                 view_cm: float | None = None):
         car, tip, others = parse_answer(answer)
         if car is None:
             raise ValueError(f"视觉模型没找到坦克（回答：{answer[:80]}）")
@@ -100,7 +114,7 @@ class BlindMap:
         self.heading_source = "default"
         heading_img = math.pi / 2  # 都没有时按朝画面上方
         vision_dir = _DIR.search(answer)
-        toward = next(((n, b) for n, b in others if n and n in user_facing), None) if user_facing else None
+        toward = next(((n, b) for n, b in others if names_match(n, user_facing)), None) if user_facing else None
         if toward:  # 用户说“车头对着垃圾桶”
             n, (x1, y1, x2, y2) = toward
             heading_img = math.atan2(-(px((y1 + y2) / 2, h_px) - cy), px((x1 + x2) / 2, w_px) - cx)
@@ -126,7 +140,10 @@ class BlindMap:
         bw_px, bh_px = px(car[2] - car[0], w_px), px(car[3] - car[1], h_px)
         c, s = abs(math.cos(heading_img)), abs(math.sin(heading_img))
         bw_cm, bh_cm = CAR_LEN_CM * c + CAR_WID_CM * s, CAR_LEN_CM * s + CAR_WID_CM * c
-        self.px_per_cm = (bw_px / bw_cm + bh_px / bh_cm) / 2
+        self.scale_from_car = (bw_px / bw_cm + bh_px / bh_cm) / 2
+        # 摄像头架着不动时，量一次“照片横向拍到多宽的地面”最准；坦克外框只要框松一点，距离就整体缩小
+        # （实测同一机位一次算出 2.4 米宽、一次 1.3 米宽）
+        self.px_per_cm = w_px / view_cm if view_cm else self.scale_from_car
         if self.px_per_cm <= 0:
             raise ValueError("坦克外框大小不对")
         self.width_cm, self.height_cm = w_px / self.px_per_cm, h_px / self.px_per_cm
@@ -268,7 +285,9 @@ Say = Callable[[str], Awaitable[None]]
 
 class BlindNavigator:
     def __init__(self, tank: TankExecutor, ask: Ask, frame=None, say: Say | None = None,
-                 cm_per_s: float = DEFAULT_CM_PER_S, facing: str = "auto", on_map=None):
+                 cm_per_s: float = DEFAULT_CM_PER_S, facing: str = "auto", on_map=None,
+                 view_cm: float | None = None):
+        self.view_cm = view_cm  # 照片横向拍到的地面宽度（厘米）；给了就不靠坦克外框估比例尺
         self.tank = tank
         self.ask = ask  # camera.PhotoTool.ask
         self.frame = frame  # 拍一帧（numpy），用来知道照片尺寸、在网页上画地图；没有时按 1280×960 算
@@ -287,7 +306,7 @@ class BlindNavigator:
         answer = await (self.ask(q, frame=img, timeout=VISION_TIMEOUT_S) if img is not None
                         else self.ask(q, timeout=VISION_TIMEOUT_S))
         try:
-            self.map = BlindMap(w, h, answer, self.facing, image=img, user_facing=facing)
+            self.map = BlindMap(w, h, answer, self.facing, image=img, user_facing=facing, view_cm=self.view_cm)
         except ValueError as e:
             return f"没看清场地：{e}。请让整个坦克都在画面里，摄像头尽量正对地面往下拍"
         m = self.map
@@ -326,6 +345,9 @@ class BlindNavigator:
         """self.blind.goto：规划好就开始闭眼走，立即返回计划。"""
         m = self.map
         steps, end, path, center, extra, fm = self.plan(target)
+        if not any(k == "forward" for k, _ in steps):
+            raise RuntimeError(f"按地图看车已经在{target}旁边了，不用走。如果实际还没到，说明地图的比例尺不对："
+                               "用 --blind-view-cm 填照片横向拍到的地面宽度，或者重新拍地图")
         self._publish(fm, path, center, target)
         total_s = sum(v for k, v in steps if k == "forward") / 1000 + sum(
             abs(v) / 90 * 0.4 for k, v in steps if k == "turn")
@@ -338,7 +360,7 @@ class BlindNavigator:
     def _goal(self, target: str):
         m = self.map
         for name, (x1, y1, x2, y2) in m.obstacles:
-            if name and (name in target or target in name):
+            if names_match(name, target):
                 return ((x1 + x2) / 2, (y1 + y2) / 2), max(x2 - x1, y2 - y1) / 2, name
         known = "、".join(n for n, _ in m.obstacles) or "（地图上没有东西）"
         raise RuntimeError(f"地图上没有“{target}”，记住的东西有：{known}。"

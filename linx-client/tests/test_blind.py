@@ -239,3 +239,27 @@ def test_build_reports_heading_and_uses_facing():
         await tank.close()
 
     asyncio.run(main())
+
+
+def test_names_match_user_wording():
+    from linx_client.blind import names_match
+
+    assert names_match("黑色垃圾桶", "对着垃圾桶") and names_match("黑色垃圾桶", "车头正对着垃圾桶")
+    assert names_match("纸箱", "纸箱") and not names_match("纸箱", "对着垃圾桶")
+    m = BlindMap(640, 360, REAL.replace("垃圾桶=", "黑色垃圾桶="), user_facing="对着垃圾桶")
+    assert m.heading_source == "user"
+
+
+def test_view_width_overrides_loose_car_box():
+    loose = REAL.replace("坦克=75,38,84,56", "坦克=72,30,88,64")  # 外框框松了一倍
+    assert BlindMap(640, 360, loose).width_cm < 0.7 * BlindMap(640, 360, REAL).width_cm  # 按外框估：场地缩水
+    m = BlindMap(640, 360, loose, view_cm=240)
+    assert m.width_cm == pytest.approx(240)
+
+
+def test_already_next_to_target_says_so_instead_of_spinning():
+    nav = BlindNavigator(TankExecutor(MockBackend(verbose=False)), None)
+    # 外框框得很松 → 比例尺偏小 → 以为已经在桶边
+    nav.map = BlindMap(640, 360, "坦克=45,20,75,80；车头=左；垃圾桶=17,28,42,64")
+    with pytest.raises(RuntimeError, match="比例尺"):
+        nav.goto("垃圾桶")

@@ -259,7 +259,7 @@ async def _run(args):
             # 一张俯拍图规划、闭眼走完：只在 self.blind.map 时拍一次照片交给视觉模型
             blind = BlindNavigator(tank, photo.ask, frame=getattr(photo.camera, "frame", None),
                                    say=lambda text: session.say(text), cm_per_s=args.blind_cm_per_s,
-                                   facing=args.blind_facing,
+                                   facing=args.blind_facing, view_cm=args.blind_view_cm,
                                    on_map=lambda *a: photo.on_photo and photo.on_photo(*a))
             register_blind_tools(mcp, blind)
             print(f"🙈 闭眼导航：直行按 {args.blind_cm_per_s} cm/s 换算，车头朝向"
@@ -472,6 +472,8 @@ def main():
                        help="一张俯拍图规划、闭眼走完（需要 --camera）：说“拍一张俯拍图”记住场地，之后去哪都不再拍照")
     p_run.add_argument("--blind-cm-per-s", type=float, default=26.0,
                        help="速度 80 直行每秒多少厘米（地毯上实测约 26；换地面或电量低时重新量）")
+    p_run.add_argument("--blind-view-cm", type=float,
+                       help="照片横向拍到的地面有多宽（厘米，摄像头不动时量一次）；不填就按坦克外框估，容易差一倍")
     p_run.add_argument("--blind-facing", choices=["auto", "up"], default="auto",
                        help="auto=让视觉模型按炮管尖判断车头朝向（会说出来），up=约定拍照前车头朝画面上方")
     p_run.add_argument("--camera-view", choices=["overhead", "front"], default="overhead",
