@@ -220,6 +220,10 @@ async def _run(args):
     # 打靶挑战：网页控制台显示计分板（on_change 在网页启动后接上）
     game = TargetChallenge(tank, Path(args.state).with_name(".leaderboard.json"), say=lambda text: session.say(text))
     register_game_tools(mcp, game)
+    if args.blind_view_cm and not args.blind:
+        print("⚠️  --blind-view-cm 只在加了 --blind（闭眼导航）时才有用，这次没开闭眼导航")
+    if args.blind and not args.camera:
+        print("⚠️  --blind 要配合 --camera 才能拍俯拍图，这次没开闭眼导航")
     photo = None
     if args.camera:
         from .camera import PhotoTool, make_camera

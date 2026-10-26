@@ -16,6 +16,7 @@ import json
 import re
 import threading
 import time
+import urllib.error
 import urllib.request
 import uuid
 from typing import Protocol
@@ -145,8 +146,15 @@ class HttpSnapshotCamera:
         self.timeout = timeout
 
     def snapshot(self) -> bytes:
-        with _NO_PROXY.open(self.url, timeout=self.timeout) as resp:
-            data = resp.read()
+        try:
+            with _NO_PROXY.open(self.url, timeout=self.timeout) as resp:
+                data = resp.read()
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(f"手机摄像头 {self.url} 返回 HTTP {e.code}：检查摄像头 App 是否还开着、"
+                               "是否设了登录密码") from None
+        except OSError as e:
+            raise RuntimeError(f"手机摄像头 {self.url} 连不上（{e}）：摄像头 App 可能停了、被切到后台，"
+                               "或手机换了网络") from None
         if not data.startswith(b"\xff\xd8"):
             raise RuntimeError(f"{self.url} 返回的不是 JPEG")
         return data
@@ -208,8 +216,12 @@ def explain(vision: dict, ident: Identity, jpeg: bytes, question: str, timeout: 
     if vision.get("token"):
         headers["Authorization"] = f"Bearer {vision['token']}"
     req = urllib.request.Request(vision["url"], data=body, method="POST", headers=headers)
-    with _NO_PROXY.open(req, timeout=timeout) as resp:
-        raw = resp.read().decode("utf-8", "replace")
+    try:
+        with _NO_PROXY.open(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        hint = "（视觉接口的 token 可能过期了：重启程序会重新拿）" if e.code in (401, 403) else ""
+        raise RuntimeError(f"灵矽视觉接口返回 HTTP {e.code}{hint}") from None
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
