@@ -238,8 +238,9 @@ class PhotoTool:
         # 与小智设备一致：把视觉接口的结果原样交给平台
         return json.dumps({"success": True, "action": "RESPONSE", "response": answer}, ensure_ascii=False)
 
-    async def ask(self, question: str, frame=None) -> str:
-        """拍一张并返回视觉模型的回答（闭环寻的也用它）。frame：分析指定的这一帧（建地图时要和算坐标的是同一张）。"""
+    async def ask(self, question: str, frame=None, timeout: float = 15) -> str:
+        """拍一张并返回视觉模型的回答（闭环寻的也用它）。frame：分析指定的这一帧（建地图时要和算坐标的是同一张）。
+        timeout：等视觉模型多久；要它按格式列很多东西时会慢得多（闭眼导航的提问实测约 17s）。"""
         vision = self.mcp.vision
         if vision is None:
             raise RuntimeError("平台没有下发视觉接口：请在智控台「对话与视觉 → 视觉分析」开启视觉模型，保存后重连")
@@ -250,7 +251,7 @@ class PhotoTool:
         except asyncio.TimeoutError:
             raise RuntimeError(f"拍照超过 {SNAPSHOT_TIMEOUT_S} 秒没拿到画面：摄像头可能被别的程序占用，"
                                "或手机连续互通相机断开了") from None
-        answer = await asyncio.to_thread(explain, vision, self.ident, jpeg, question)
+        answer = await asyncio.to_thread(explain, vision, self.ident, jpeg, question, timeout)
         self.last_jpeg, self.last_answer = jpeg, answer
         print(f"📷 {question} → {answer}（{time.monotonic() - t0:.1f}s）")
         if self.on_photo:

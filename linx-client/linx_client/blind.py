@@ -33,6 +33,7 @@ EXTRA_MARGIN_CM = 15.0  # 闭眼走误差大，障碍物在“车身半径 + MAR
 MARGIN_STEPS = (EXTRA_MARGIN_CM, 8.0, 0.0)  # 留不出路时逐步收窄，并如实告诉用户
 MIN_TURN_DEG = 4
 STOP_GAP_CM = 8.0  # 到了以后车头离目标边缘多远
+VISION_TIMEOUT_S = 45  # 要视觉模型按格式列坦克、车头、炮管尖和每个障碍物，实测约 17s（简单问题约 2.6s）
 CAR_NAMES = ("坦克", "小车", "小坦克", "车")
 
 
@@ -283,7 +284,8 @@ class BlindNavigator:
         img = await asyncio.to_thread(self.frame) if self.frame else None
         h, w = (img.shape[:2] if img is not None else (960, 1280))
         q = question(target or None)
-        answer = await (self.ask(q, frame=img) if img is not None else self.ask(q))
+        answer = await (self.ask(q, frame=img, timeout=VISION_TIMEOUT_S) if img is not None
+                        else self.ask(q, timeout=VISION_TIMEOUT_S))
         try:
             self.map = BlindMap(w, h, answer, self.facing, image=img, user_facing=facing)
         except ValueError as e:

@@ -84,7 +84,7 @@ class FakePhoto:
     def __init__(self, answer):
         self.answer, self.calls = answer, 0
 
-    async def ask(self, question, frame=None):
+    async def ask(self, question, frame=None, timeout=15):
         self.calls += 1
         assert "坦克=" in question and "百分比" in question
         return self.answer
