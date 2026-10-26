@@ -17,10 +17,10 @@
 
 ## Project
 
-七牛 Hackathon「智能硬件」课题：一辆能发射子弹的 CyberBrick 小车（Mini T 类履带车，主控 Core = ESP32-C3 / MicroPython），接入灵矽（Linx）平台实现语音控制。没有灵矽实体硬件，由 `linx-client/` 在电脑上**模拟一台灵矽设备**（电脑麦克风/扬声器），再通过 USB 串口控车。
+七牛 Hackathon「智能硬件」课题：一辆能发射子弹的 CyberBrick 小车（Mini T 类履带车，主控 Core = ESP32-C3 / MicroPython），接入灵矽（Linx）平台实现语音控制。没有灵矽实体硬件，由 `linx-client/` 在电脑上**模拟一台灵矽设备**（电脑麦克风/扬声器），再通过 Wi-Fi 或 USB 串口控车。
 
-- **主线（v3）**：Android Chrome 网页本身就是灵矽设备，通过 WebUSB（有线）或 Web Bluetooth（无线）控车，见 `docs/技术方案-v3-网页版.md`。`linx-client/` 是 Python 参考实现：网页的协议、工具描述和安全约束必须与它一致，改动其中一边时同步另一边。
-- 设计文档（中文，含里程碑、风险、待确认项）：`docs/技术方案-v3-网页版.md`（主线）、`docs/技术方案.md`（v2，协议细节）。改架构或协议时同步更新。
+- **主线**：`linx-client/`（Python）在电脑上模拟灵矽设备，通过 Wi-Fi UDP（主用）或 USB 串口控车。曾计划的安卓网页版（WebUSB / Web Bluetooth）没有实施，已删除。
+- 文档（中文）：`docs/架构设计.md`（架构、模块规格、主打场景、分工）、`docs/技术方案.md`（协议和实现细节、里程碑、风险）、`docs/运行说明.md`（安装运行、演示脚本）。改架构或协议时同步更新。
 - **Device-Id 就是灵矽的唯一凭据**（平台不校验 token），绝不能写进仓库（仓库是公开的）。
 - 文档、注释、终端输出、MCP 工具描述均使用中文，保持一致。
 
