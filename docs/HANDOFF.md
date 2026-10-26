@@ -12,6 +12,8 @@
 
 ## 进行中
 
+- **（2026-10-26）补测试，覆盖率 76% → 90%**（分支 `claude/test-coverage`）：新增 `test_ota_identity`、`test_netadmin`、`test_serial_backend`、`test_cli`（run 在各参数组合下注册哪些工具、activate、car-exec、wifi-setup、tank-test）、`test_session_events`（事件转发、重连、麦克风上传规则）、`test_camera_more`（假 VideoCapture）、`test_audio`（假 sounddevice），`test_macros` 补全军出击（前进 5000 速度 100 × 8）等。只加测试不改业务代码；`requirements-dev.txt` 加 `pytest-cov`，`.coverage` 已 gitignore。跑覆盖率：`python -m pytest --cov=linx_client`。✅ 223 passed。仍偏低：`__main__.py` 71%（marker-test/map-test 实时循环、pad 常驻、交互输入 Wi-Fi 配置、USB 打开车）、`marker_seek.py` 78%
+
 - **（2026-10-26）网页控制台和手机手柄换皮（野战通讯台风格）**：用户确认了 Claude Design 设计稿（https://claude.ai/artifact/1KWXwFmD3p84NqnSiE2A6b ，私有）后重写 `web/index.html`、`web/pad.html` 的样式和结构。所有元素 id、WebSocket 消息、按键行为不变；控制台改成三栏（左车况/人格/手柄二维码，中通讯记录 + 输入栏里的麦克风，右急停/打靶/手动），≤1180px 两栏、≤760px 单栏整页滚动；跟随系统深浅色。工具调用渲染成「动作名 + 参数」指令条，`last_error` 显示在车况卡片里。**status 里没有履带功率和动作进度**，所以控制台只显示“忙碌条”（有当前动作/任务就滚动），不画假数据；手柄的 L/R 功率条用的是摇杆本地算出的真实值。字体从 Google Fonts 加载，断网时退回系统字体。另：空格按住说话现在在任何输入框里都不触发（之前只排除了文字指令框，在打靶表单里打空格会误触）。✅ 用 `pad --backend mock` 起服务，headless Chrome 截图看过 1440 宽深/浅色、390 宽、手柄横屏；未在真手机上试
 
 - **（2026-10-26）大角度转向会转过头 → 拆段转**：在公司地毯上实测满速原地转：0.2s=45°、0.4s=90°（线性），但 **0.6s≈180°**（本该 135°，转久了越转越快）；绕到目标后面时最后一下 124° 的转身明显转多。改为 `executor.turn` 超过 `MAX_TURN_CHUNK_DEG=90` 时等分成几段（124° → 62°×2，360° → 90°×4），段间停 `TURN_PAUSE_S=0.3s` 让车停稳，每段都从静止起步、落在线性区间里；队列里仍是一个动作，`turn_deg` 不变。`test_seek` 里一处按调用序号断言的地方改为跳过转向分段。✅ 167 passed。另：同一块地毯后来重测单次 90° 变成 **0.30s**（之前 0.4s，疑似电量或位置不同），用户启动时用 `--turn-ms-per-90 300`；换场地、换电池都要重测
