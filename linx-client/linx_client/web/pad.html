@@ -7,84 +7,119 @@
 <meta name="theme-color" content="#111317">
 <title>坦克手柄</title>
 <style>
+  /* 野战手柄：左摇杆（两侧履带功率条）/ 右炮管+开火；与控制台同一套橄榄底 + 信号琥珀 */
   :root {
-    --bg: #111317; --panel: #1b1e25; --line: #2c313b; --text: #eceef2; --muted: #8b92a1;
-    --accent: #5b8cff; --good: #3ccf7e; --bad: #ff4d4d; --fire: #ff8a1f;
+    --bg: #12150F; --panel: #1B2017; --panel-2: #232A1E; --line: #333C2C; --text: #E8EADF; --muted: #A3AB96;
+    --accent: #F0B23A; --accent-soft: #2A2416; --good: #7BD389; --bad: #E5484D; --bad-text: #FF8A8D; --bad-soft: #3A1D1E;
+    --display: "Saira Stencil One", Impact, "Arial Black", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+    color-scheme: dark;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
   body {
-    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", sans-serif;
     touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
     display: grid; grid-template-rows: auto 1fr; height: 100dvh;
     padding: max(10px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
              max(10px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   }
-  header { display: flex; align-items: center; gap: 10px; min-height: 52px; }
-  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); flex: none; }
-  .dot.on { background: var(--good); }
+  button { font: inherit; color: inherit; }
+  header { display: flex; align-items: center; gap: 12px; min-height: 52px; }
+  .brand { font-family: var(--display); font-size: 22px; line-height: 1; color: var(--accent); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); flex: none; }
+  .dot.on { background: var(--good); box-shadow: 0 0 0 3px rgba(123,211,137,.2); }
   #status { flex: 1; min-width: 0; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stop-wrap {
+    flex: none; padding: 4px; border-radius: 7px;
+    background: repeating-linear-gradient(-45deg, var(--accent) 0 8px, var(--bg) 8px 16px);
+  }
   #stop {
-    flex: none; border: 0; border-radius: 12px; padding: 12px 22px; font: inherit; font-size: 17px;
-    font-weight: 700; letter-spacing: .15em; color: #fff; background: var(--bad);
+    border: 0; border-radius: 4px; padding: 10px 22px; font-size: 17px;
+    font-weight: 700; letter-spacing: .3em; padding-left: calc(22px + .3em); color: #fff; background: var(--bad);
   }
   main { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 16px; min-height: 0; }
+
+  /* 摇杆 + 两侧履带功率条 */
+  .drive { justify-self: center; display: flex; align-items: center; gap: 14px; }
+  .track { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .track .bar { position: relative; width: 14px; height: min(34dvh, 130px); border-radius: 7px; background: var(--panel-2); overflow: hidden; }
+  .track .bar::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--line); }
+  .track .bar i { position: absolute; left: 0; right: 0; height: 0; background: var(--good); }
+  .track .bar i.rev { background: var(--accent); }
+  .track span { font: 11px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; min-width: 4.5em; text-align: center; }
   #stick {
-    justify-self: center; position: relative; border-radius: 50%;
-    width: min(44vw, 72dvh, 300px); aspect-ratio: 1;
-    background: radial-gradient(circle, #232733 0%, #1b1e25 70%); border: 2px solid var(--line);
+    position: relative; border-radius: 50%;
+    width: min(36vw, 64dvh, 280px); aspect-ratio: 1;
+    background: radial-gradient(circle, var(--panel-2) 0%, var(--panel) 70%); border: 2px solid var(--line);
   }
   #stick::before, #stick::after { content: ""; position: absolute; background: var(--line); }
-  #stick::before { left: 50%; top: 12%; bottom: 12%; width: 2px; transform: translateX(-1px); }
-  #stick::after { top: 50%; left: 12%; right: 12%; height: 2px; transform: translateY(-1px); }
+  #stick::before { left: 50%; top: 10%; bottom: 10%; width: 1px; }
+  #stick::after { top: 50%; left: 10%; right: 10%; height: 1px; }
+  .ring { position: absolute; inset: 22%; border-radius: 50%; border: 1px dashed var(--line); }
   #knob {
-    position: absolute; left: 50%; top: 50%; width: 38%; aspect-ratio: 1; border-radius: 50%;
-    transform: translate(-50%, -50%); background: var(--accent); box-shadow: 0 4px 16px rgba(0,0,0,.4); z-index: 1;
+    position: absolute; left: 50%; top: 50%; width: 36%; aspect-ratio: 1; border-radius: 50%;
+    transform: translate(-50%, -50%); background: var(--accent);
+    box-shadow: 0 0 0 8px rgba(240,178,58,.16), 0 6px 18px rgba(0,0,0,.5); z-index: 1;
   }
-  #stick.active #knob { background: #7aa3ff; }
+  #stick.active #knob { box-shadow: 0 0 0 12px rgba(240,178,58,.26), 0 6px 18px rgba(0,0,0,.5); }
   .label { position: absolute; color: var(--muted); font-size: 12px; }
   .l-up { top: 3%; left: 50%; transform: translateX(-50%); }
   .l-down { bottom: 3%; left: 50%; transform: translateX(-50%); }
   .l-left { left: 4%; top: 50%; transform: translateY(-50%); }
   .l-right { right: 4%; top: 50%; transform: translateY(-50%); }
-  .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; justify-self: center; width: min(44vw, 340px); }
+
+  .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; justify-self: center; width: min(42vw, 340px); }
   .btn {
-    border: 2px solid var(--line); background: var(--panel); color: var(--text); border-radius: 16px;
-    font: inherit; font-size: 16px; font-weight: 600; padding: 0; height: min(16dvh, 76px);
+    border: 2px solid var(--line); background: var(--panel); color: var(--text); border-radius: 6px;
+    font-size: 16px; font-weight: 500; padding: 0; height: min(16dvh, 64px);
   }
-  .btn.held { background: var(--accent); border-color: var(--accent); }
+  .btn.held { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 700; }
   #fire {
-    grid-column: 1 / -1; height: min(26dvh, 120px); font-size: 24px; letter-spacing: .2em;
-    border-color: var(--fire); color: var(--fire); background: rgba(255,138,31,.08);
+    grid-column: 1 / -1; height: min(28dvh, 112px); border-radius: 8px;
+    border-color: var(--bad); color: var(--bad-text); background: var(--bad-soft);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
   }
-  #fire.held { background: var(--fire); color: #111; }
+  #fire b { font-size: 28px; letter-spacing: .4em; padding-left: .4em; }
+  #fire small { font: 12px var(--mono); color: var(--muted); }
+  #fire.held { background: var(--bad); color: #fff; }
+  #fire.held small { color: #fff; }
+  #fire.locked { opacity: .5; }
+  #dance { grid-column: 1 / -1; height: min(11dvh, 44px); font-size: 14px; color: var(--muted); }
   #hint { display: none; }
   @media (orientation: portrait) {
     main { grid-template-columns: 1fr; grid-template-rows: auto auto; align-content: center; gap: 28px; }
-    #stick { width: min(70vw, 300px); }
+    #stick { width: min(62vw, 280px); }
     .buttons { width: min(86vw, 380px); }
-    #hint { display: block; text-align: center; color: var(--muted); font-size: 12px; }
+    #hint { display: block; grid-column: 1 / -1; text-align: center; color: var(--muted); font-size: 12px; }
   }
 </style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Stencil+One&family=JetBrains+Mono:wght@400&display=swap">
 </head>
 <body>
 <header>
+  <span class="brand">TK-01</span>
   <span class="dot" id="dot"></span>
   <span id="status">连接中…</span>
-  <button id="stop">急停</button>
+  <span class="stop-wrap"><button id="stop">急停</button></span>
 </header>
 <main>
-  <div id="stick">
-    <span class="label l-up">前进</span><span class="label l-down">后退</span>
-    <span class="label l-left">左转</span><span class="label l-right">右转</span>
-    <div id="knob"></div>
+  <div class="drive">
+    <div class="track"><div class="bar"><i id="bar-l"></i></div><span id="val-l">L 0</span></div>
+    <div id="stick">
+      <div class="ring"></div>
+      <span class="label l-up">前进</span><span class="label l-down">后退</span>
+      <span class="label l-left">左</span><span class="label l-right">右</span>
+      <div id="knob"></div>
+    </div>
+    <div class="track"><div class="bar"><i id="bar-r"></i></div><span id="val-r">R 0</span></div>
   </div>
   <div class="buttons">
     <button class="btn" data-barrel="1">炮管 ↑</button>
     <button class="btn" data-barrel="-1">炮管 ↓</button>
-    <button class="btn" id="fire">开火</button>
-    <button class="btn" id="dance" style="grid-column: 1 / -1; height: min(11dvh, 52px); font-size: 14px;">跳舞</button>
-    <div id="hint" style="grid-column: 1 / -1">横过来更好操作</div>
+    <button class="btn" id="fire"><b>开火</b><small id="shots">已发 0 发</small></button>
+    <button class="btn" id="dance">跳舞</button>
+    <div id="hint">横过来更好操作</div>
   </div>
 </main>
 <script>
@@ -103,7 +138,11 @@ function connect() {
   ws.onmessage = (ev) => {
     const e = JSON.parse(ev.data);
     const s = e.status;
-    if (s) $("status").textContent = `${s.current || s.mission || "空闲"} · 已发 ${s.shots_fired} 发` + (s.fire_enabled ? "" : " · 发射锁定");
+    if (s) {
+      $("status").textContent = (s.current || s.mission || "空闲") + (s.fire_enabled ? "" : " · 发射锁定");
+      $("shots").textContent = s.fire_enabled ? `已发 ${s.shots_fired} 发` : "发射锁定";
+      $("fire").classList.toggle("locked", !s.fire_enabled);
+    }
     if (e.type === "error") $("status").textContent = "⚠ " + e.text;
   };
 }
@@ -120,9 +159,21 @@ function tracks() {
   return [power(l), power(r)];
 }
 
+// 两侧功率条：中线往上是前进，往下是后退
+function showTrack(side, v) {
+  const bar = $("bar-" + side);
+  bar.style.height = Math.abs(v) / 2 + "%";
+  bar.style.top = v < 0 ? "50%" : "";
+  bar.style.bottom = v < 0 ? "" : "50%";
+  bar.classList.toggle("rev", v < 0);
+  $("val-" + side).textContent = `${side.toUpperCase()} ${v > 0 ? "+" : ""}${v}`;
+}
+
 // 每 0.1 秒发一次当前状态（车上看门狗 0.4 秒），松手时补发一次全零让车立刻停
 setInterval(() => {
   const [l, r] = tracks();
+  showTrack("l", l);
+  showTrack("r", r);
   const active = l !== 0 || r !== 0 || barrel !== 0;
   if (active || wasActive) send({ type: "pad", l, r, barrel });
   wasActive = active;
