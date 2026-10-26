@@ -262,7 +262,8 @@ async def _run(args):
                                    facing=args.blind_facing,
                                    on_map=lambda *a: photo.on_photo and photo.on_photo(*a))
             register_blind_tools(mcp, blind)
-            print(f"🙈 闭眼导航：直行按 {args.blind_cm_per_s} cm/s 换算，拍照前车头朝{'画面上方' if args.blind_facing == 'up' else '任意方向'}")
+            print(f"🙈 闭眼导航：直行按 {args.blind_cm_per_s} cm/s 换算，车头朝向"
+                  + ("约定朝画面上方" if args.blind_facing == "up" else "按炮管尖判断"))
         register_camera_tools(mcp, photo, view=args.camera_view, seeker=seeker, wanderer=wanderer)
         print(f"📷 摄像头：{args.camera}（需在智控台开启视觉分析）")
     else:
@@ -470,8 +471,8 @@ def main():
     p_run.add_argument("--blind", action="store_true",
                        help="一张俯拍图规划、闭眼走完（需要 --camera）：说“拍一张俯拍图”记住场地，之后去哪都不再拍照")
     p_run.add_argument("--blind-cm-per-s", type=float, default=30.0, help="速度 80 直行每秒多少厘米（要实测）")
-    p_run.add_argument("--blind-facing", choices=["up", "auto"], default="up",
-                       help="up=拍照前车头朝画面上方（推荐），auto=让视觉模型按炮管尖判断")
+    p_run.add_argument("--blind-facing", choices=["auto", "up"], default="auto",
+                       help="auto=让视觉模型按炮管尖判断车头朝向（会说出来），up=约定拍照前车头朝画面上方")
     p_run.add_argument("--camera-view", choices=["overhead", "front"], default="overhead",
                        help="overhead=摄像头固定在场地旁边（俯拍或斜拍，越高越好），front=摄像头装在车上朝前")
 

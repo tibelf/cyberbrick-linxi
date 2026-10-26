@@ -49,9 +49,10 @@ def test_scale_and_pose_from_car_box():
 
 def test_warns_when_barrel_contradicts_facing_up():
     answer = ANSWER.replace(f"炮管尖={pct_pt(125, 42)}", f"炮管尖={pct_pt(140, 30)}")  # 炮管朝右
-    assert BlindMap(W, H, answer).tip_disagrees
-    m = BlindMap(W, H, answer, facing="auto")  # 按炮管尖算朝向
-    assert m.pose[2] == pytest.approx(0, abs=0.05)
+    assert BlindMap(W, H, answer, facing="up").tip_disagrees
+    m = BlindMap(W, H, answer)  # 默认按炮管尖算朝向
+    assert m.pose[2] == pytest.approx(0, abs=0.05) and m.heading_from_tip
+    assert m.heading_words() == "画面右边"
 
 
 def test_route_goes_around_the_box_with_margin():
@@ -166,15 +167,32 @@ def test_narrow_gap_shrinks_margin_and_says_so():
     asyncio.run(main())
 
 
-def test_few_turns_near_side_and_faces_target():
-    from linx_client.blind import approach_point, route_end, simplify
+def _nav(answer, cm_per_s=30):
+    nav = BlindNavigator(None, None, cm_per_s=cm_per_s)
+    nav.map = BlindMap(W, H, answer)
+    return nav
 
-    m = BlindMap(W, H, ANSWER)
-    fm, base = m.floor_map(EXTRA_MARGIN_CM), m.floor_map(0)
-    goal = approach_point(fm, (125, 170), 4, m.pose[:2])
-    assert goal[1] < 170  # 停在瓶子靠车的这一侧，不绕到背后
-    path = simplify(m.pose[:2], fm.plan(m.pose[:2], goal), base)
-    steps = compile_route(m.pose, path, 30, face=(125, 170))
+
+def test_few_turns_near_side_and_faces_target():
+    from linx_client.blind import route_end
+
+    nav = _nav(ANSWER)
+    steps, end, path, center, extra, _ = nav.plan("瓶子")
     assert sum(k == "turn" for k, _ in steps) <= 3  # 拐弯少：每拐一次都多一份闭眼误差
-    x, y, h = route_end(m.pose, path, face=(125, 170))
+    x, y, h = end
+    assert y < 170  # 停在瓶子靠车的这一侧，不绕到背后
     assert abs(math.degrees(math.atan2(170 - y, 125 - x) - h)) < 1  # 到了正对目标，可以直接开火
+    assert math.dist((x, y), (125, 170)) == pytest.approx(4 + CAR_LEN_CM / 2 + 8, abs=1)  # 开到跟前才停
+
+
+def test_car_already_facing_target_goes_straight_and_close():
+    """用户实测：车头正对左边的垃圾桶，却被当成朝上 → 先左转 90°；而且停在离桶半米外。"""
+    answer = (f"坦克={pct_box(170, 100, CAR_LEN_CM, CAR_WID_CM)}；炮管尖={pct_pt(158, 100)}；"
+              f"垃圾桶={pct_box(80, 100, 40, 40)}")
+    nav = _nav(answer)
+    assert nav.map.heading_words() == "画面左边"
+    steps, end, *_ = nav.plan("垃圾桶")
+    assert [k for k, _ in steps] == ["forward"]  # 直接往前开，不转弯
+    gap = 170 - 80 - 20 - CAR_LEN_CM / 2 - 8  # 车中心到“桶边缘前 8cm 处”还要走的距离
+    assert steps[0][1] == pytest.approx(gap / 30 * 1000, rel=0.05)
+    assert end[0] == pytest.approx(80 + 20 + CAR_LEN_CM / 2 + 8, abs=1.5)

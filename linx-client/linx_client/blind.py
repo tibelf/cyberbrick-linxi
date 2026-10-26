@@ -9,8 +9,10 @@
 
 精度：没有编码器/陀螺仪，履带打滑，1–2 米、拐一两个弯的路线终点大约偏十几厘米。所以障碍物额外多留 EXTRA_MARGIN_CM，
 转向一律满速原地转（唯一校准过的转法），直行时长按 cm_per_s（`--blind-cm-per-s`，要实测）换算。
-车头朝向：视觉模型很难判断（实测“几点钟方向”几乎总答同一个），默认约定拍照前车头朝画面上方（facing="up"）；
-facing="auto" 时改用“车身中心 → 炮管尖”估计。
+车头朝向：默认（facing="auto"）用视觉模型给的“车身中心 → 炮管尖”，并在回复里用一句话说出来（“车头朝画面左边”），
+看错了用户一听就知道；视觉模型没给炮管尖时按车头朝画面上方算。facing="up" 强制约定车头朝上（实测用户经常没摆正，
+车头其实对着目标却被当成朝上，结果先左转 90° 跑偏，所以不再默认）。
+要去的目标本身不算障碍物：额外余量是防撞“别的”东西的，对目标要一直开到跟前（车头离它边缘 STOP_GAP_CM）。
 """
 
 import asyncio
@@ -29,6 +31,7 @@ DEFAULT_CM_PER_S = 30.0  # 速度 80 直行每秒多少厘米：猜的，要实�
 EXTRA_MARGIN_CM = 15.0  # 闭眼走误差大，障碍物在“车身半径 + MARGIN_CM”之外再多留这么多
 MARGIN_STEPS = (EXTRA_MARGIN_CM, 8.0, 0.0)  # 留不出路时逐步收窄，并如实告诉用户
 MIN_TURN_DEG = 4
+STOP_GAP_CM = 8.0  # 到了以后车头离目标边缘多远
 CAR_NAMES = ("坦克", "小车", "小坦克", "车")
 
 
@@ -69,7 +72,7 @@ def parse_answer(answer: str):
 class BlindMap:
     """视觉模型的回答 → 以厘米为单位的地图（x 向右、y 向上，原点在照片左下角）+ 车的位置估计。"""
 
-    def __init__(self, w_px: int, h_px: int, answer: str, facing: str = "up", image=None):
+    def __init__(self, w_px: int, h_px: int, answer: str, facing: str = "auto", image=None):
         car, tip, others = parse_answer(answer)
         if car is None:
             raise ValueError(f"视觉模型没找到坦克（回答：{answer[:80]}）")
@@ -78,9 +81,11 @@ class BlindMap:
         cx = px((car[0] + car[2]) / 2, w_px)
         cy = px((car[1] + car[3]) / 2, h_px)
         # 车头朝向（图像坐标：u 向右、v 向下）
-        if facing == "auto" and tip is not None:
+        self.heading_from_tip = False
+        if facing == "auto" and tip is not None and math.hypot(px(tip[0], w_px) - cx, px(tip[1], h_px) - cy) > 1:
             du, dv = px(tip[0], w_px) - cx, px(tip[1], h_px) - cy
-            heading_img = math.atan2(-dv, du) if math.hypot(du, dv) > 1 else math.pi / 2
+            heading_img = math.atan2(-dv, du)
+            self.heading_from_tip = True
         else:
             heading_img = math.pi / 2  # 约定车头朝画面上方
         self.tip_disagrees = False
@@ -106,7 +111,12 @@ class BlindMap:
         self.image = image
         self.legs = 0  # 闭眼走过几段：越多位置越不准
 
-    def floor_map(self, extra_margin_cm: float) -> FloorMap:
+    def heading_words(self) -> str:
+        """车头朝向说成人话（画面方向），让用户一听就知道有没有看错。"""
+        names = ["右边", "右上方", "上方", "左上方", "左边", "左下方", "下方", "右下方"]
+        return "画面" + names[round(math.degrees(self.pose[2]) / 45) % 8]
+
+    def floor_map(self, extra_margin_cm: float, skip: str | None = None) -> FloorMap:
         import numpy as np
 
         W, H = int(self.width_cm / RES_CM) + 1, int(self.height_cm / RES_CM) + 1
@@ -114,6 +124,8 @@ class BlindMap:
         fm = FloorMap(x0=0.0, y1=H * RES_CM, image=self._top_image(W, H), known=np.full((H, W), 255, np.uint8),
                       obstacle=obstacle)
         for name, (x1, y1, x2, y2) in self.obstacles:
+            if name == skip:  # 要去的目标本身不挡路
+                continue
             r1, c1 = int((fm.y1 - y2) / RES_CM), int(x1 / RES_CM)
             r2, c2 = int((fm.y1 - y1) / RES_CM), int(x2 / RES_CM)
             obstacle[max(r1, 0):max(r2 + 1, 0), max(c1, 0):max(c2 + 1, 0)] = 255
@@ -202,21 +214,24 @@ def simplify(start, path, fm: FloorMap) -> list:
     return out
 
 
-def approach_point(fm: FloorMap, center, half_size_cm: float, start):
-    """目标旁边、离车最近的一个可走的点（不要绕到目标背后去）。"""
-    best = None
-    for extra in (2, 6, 12, 20):
-        r = half_size_cm + CAR_RADIUS_CM + MARGIN_CM + extra
-        for k in range(36):
-            a = 2 * math.pi * k / 36
-            p = (center[0] + r * math.cos(a), center[1] + r * math.sin(a))
-            if fm.free(*p):
-                d = math.dist(p, start)
-                if best is None or d < best[0]:
-                    best = (d, p)
-        if best:
-            return best[1]
-    return None
+def stop_short(start, path, center, stop_cm: float) -> list:
+    """沿路线走，到离 center 还有 stop_cm 的地方就停：返回截短后的路线（不含起点）。起点已经够近时返回空。"""
+    pts = [start] + list(path)
+    if math.dist(start, center) <= stop_cm:
+        return []
+    out = []
+    for a, b in zip(pts, pts[1:]):
+        if math.dist(b, center) > stop_cm:
+            out.append(b)
+            continue
+        lo, hi = 0.0, 1.0  # a 在外、b 在里：二分找到正好 stop_cm 的点
+        for _ in range(30):
+            mid = (lo + hi) / 2
+            p = (a[0] + (b[0] - a[0]) * mid, a[1] + (b[1] - a[1]) * mid)
+            lo, hi = (mid, hi) if math.dist(p, center) > stop_cm else (lo, mid)
+        out.append((a[0] + (b[0] - a[0]) * lo, a[1] + (b[1] - a[1]) * lo))
+        return out
+    return out
 
 
 Ask = Callable[..., Awaitable[str]]
@@ -225,7 +240,7 @@ Say = Callable[[str], Awaitable[None]]
 
 class BlindNavigator:
     def __init__(self, tank: TankExecutor, ask: Ask, frame=None, say: Say | None = None,
-                 cm_per_s: float = DEFAULT_CM_PER_S, facing: str = "up", on_map=None):
+                 cm_per_s: float = DEFAULT_CM_PER_S, facing: str = "auto", on_map=None):
         self.tank = tank
         self.ask = ask  # camera.PhotoTool.ask
         self.frame = frame  # 拍一帧（numpy），用来知道照片尺寸、在网页上画地图；没有时按 1280×960 算
@@ -247,28 +262,39 @@ class BlindNavigator:
             return f"没看清场地：{e}。请让整个坦克都在画面里，摄像头尽量正对地面往下拍"
         m = self.map
         names = "、".join(n for n, _ in m.obstacles) or "没有障碍物"
-        warn = "；注意：炮管看起来不是朝画面上方，请把车头摆正朝上再拍一次" if m.tip_disagrees else ""
-        return (f"记住场地了：大约 {m.width_cm / 100:.1f}×{m.height_cm / 100:.1f} 米，障碍物：{names}{warn}。"
+        if m.heading_from_tip:
+            facing = f"我看车头朝{m.heading_words()}（看错了就说“重新拍地图”）"
+        else:
+            facing = "看不清炮管，按车头朝画面上方算" if self.facing == "auto" else "按约定车头朝画面上方"
+            if m.tip_disagrees:
+                facing += "，但炮管看起来不是朝上，请把车头摆正朝上再拍一次"
+        return (f"记住场地了：大约 {m.width_cm / 100:.1f}×{m.height_cm / 100:.1f} 米，障碍物：{names}；{facing}。"
                 "之后去哪都闭着眼按路线走，不再拍照")
 
-    def goto(self, target: str) -> str:
-        """self.blind.goto：规划好就开始闭眼走，立即返回计划。"""
+    def plan(self, target: str):
+        """规划去 target 的路线 → (动作序列, 终点估计, 路线点, 目标中心, 用了多少额外余量, 规划用的地图)。"""
         m = self.map
         if m is None:
             raise RuntimeError("还没有记住场地：先说“拍一张俯拍图”")
-        center, half = self._goal(target)
-        base = m.floor_map(0)
+        center, half, name = self._goal(target)
+        base = m.floor_map(0, skip=name)
         for extra in MARGIN_STEPS:
-            fm = m.floor_map(extra) if extra else base
-            goal = approach_point(fm, center, half, m.pose[:2])
-            path = fm.plan(m.pose[:2], goal) if goal else None
+            fm = m.floor_map(extra, skip=name) if extra else base
+            path = fm.plan(m.pose[:2], center)
             if path:
                 break
         else:
             raise RuntimeError(f"找不到能绕开障碍物去“{target}”的路")
         path = simplify(m.pose[:2], path, base)
+        path = stop_short(m.pose[:2], path, center, half + CAR_LEN_CM / 2 + STOP_GAP_CM)
         steps = compile_route(m.pose, path, self.cm_per_s, face=center)
         end = route_end(m.pose, path, face=center)
+        return steps, end, path, center, extra, fm
+
+    def goto(self, target: str) -> str:
+        """self.blind.goto：规划好就开始闭眼走，立即返回计划。"""
+        m = self.map
+        steps, end, path, center, extra, fm = self.plan(target)
         self._publish(fm, path, center, target)
         total_s = sum(v for k, v in steps if k == "forward") / 1000 + sum(
             abs(v) / 90 * 0.4 for k, v in steps if k == "turn")
@@ -282,7 +308,7 @@ class BlindNavigator:
         m = self.map
         for name, (x1, y1, x2, y2) in m.obstacles:
             if name and (name in target or target in name):
-                return ((x1 + x2) / 2, (y1 + y2) / 2), max(x2 - x1, y2 - y1) / 2
+                return ((x1 + x2) / 2, (y1 + y2) / 2), max(x2 - x1, y2 - y1) / 2, name
         known = "、".join(n for n, _ in m.obstacles) or "（地图上没有东西）"
         raise RuntimeError(f"地图上没有“{target}”，记住的东西有：{known}。"
                            f"可以重新调用 self.blind.map，target 填“{target}”，让视觉模型专门找它")
