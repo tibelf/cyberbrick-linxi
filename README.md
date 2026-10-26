@@ -1,5 +1,8 @@
 # CyberBrick 语音坦克
 
+[![tests](https://img.shields.io/github/actions/workflow/status/tibelf/cyberbrick-linxi/tests.yml?branch=main&label=tests&logo=github)](https://github.com/tibelf/cyberbrick-linxi/actions/workflows/tests.yml)
+[![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/tibelf/cyberbrick-linxi/badges/coverage.json)](https://github.com/tibelf/cyberbrick-linxi/actions/workflows/tests.yml)
+
 七牛 Hackathon「智能硬件」课题：一辆能发射子弹的 CyberBrick Mini T 履带车，接入**灵矽（Linx）**语音交互。对它说「往前走两秒，左转，开一炮」，它会照做并语音回应。没有灵矽实体硬件，由电脑模拟一台灵矽设备，通过 Wi-Fi 控车。
 
 <p>

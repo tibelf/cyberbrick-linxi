@@ -18,3 +18,4 @@ markers.svg
 # 测试覆盖率
 .coverage
 htmlcov/
+coverage.json
