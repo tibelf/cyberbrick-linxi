@@ -12,6 +12,12 @@
   <img src="docs/images/tank-top.jpg" width="49%" alt="小车俯视">
 </p>
 
+## 演示视频
+
+[![演示视频：点击播放](docs/images/demo-cover.jpg)](docs/demo/demo.mp4)
+
+点击上图播放（约 2 分钟，[`docs/demo/demo.mp4`](docs/demo/demo.mp4)）：产品介绍、两种行驶风格，以及在办公室地毯上的实车语音控制演示。
+
 ## 主打功能
 
 1. **发射炮弹、绕杯子一圈**
