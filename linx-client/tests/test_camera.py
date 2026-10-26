@@ -156,3 +156,29 @@ def test_pick_size_prefers_full_4_3_frame():
     assert OpenCVCamera(0)._pick_size(webcam) == (1920, 1080)
     old = FakeCap([(640, 480)])
     assert OpenCVCamera(0)._pick_size(old) == (640, 480)
+
+
+def test_errors_say_which_side_failed():
+    """403 之类的错误要说清是手机摄像头还是灵矽视觉接口，用户才知道去查哪边。"""
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Deny(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            self.send_response(403)
+            self.end_headers()
+
+        do_POST = do_GET
+
+    srv = HTTPServer(("127.0.0.1", 0), Deny)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_port}"
+    with pytest.raises(RuntimeError, match="手机摄像头.*403"):
+        HttpSnapshotCamera(url + "/shot.jpg").snapshot()
+    with pytest.raises(RuntimeError, match="灵矽视觉接口返回 HTTP 403.*token"):
+        explain({"url": url + "/explain2", "token": "vt"}, IDENT, JPEG, "看看")
+    with pytest.raises(RuntimeError, match="连不上"):
+        HttpSnapshotCamera("http://127.0.0.1:9/shot.jpg", timeout=1).snapshot()
+    srv.shutdown()

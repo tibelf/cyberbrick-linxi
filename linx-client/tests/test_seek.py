@@ -138,8 +138,9 @@ def test_external_turns_by_measured_heading():
         await tank.close()
         drives = _calls(be, "drive")
         assert drives[0][1] == drives[0][2] > 0  # 试探前进
-        assert drives[1][1] < 0 < drives[1][2]  # 左转
-        assert drives[2][1] == drives[2][2] > 0  # 再前进
+        assert drives[1][1] < 0 < drives[1][2]  # 左转（超过 90° 会拆成几段）
+        after_turn = next(d for d in drives[1:] if not d[1] < 0 < d[2])
+        assert after_turn[1] == after_turn[2] > 0  # 转完再前进
         assert said[0].startswith("已走到")
 
     asyncio.run(main())

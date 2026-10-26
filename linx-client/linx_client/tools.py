@@ -221,3 +221,30 @@ def register_camera_tools(mcp: McpServer, photo, view: str = "overhead", seeker=
         [Prop("question", "string", "要从照片里回答的问题")],
         photo,
     )
+
+
+def register_blind_tools(mcp: McpServer, blind) -> None:
+    """blind 是 blind.BlindNavigator：一张俯拍图规划、闭眼走完。"""
+    mcp.add_tool(
+        "self.blind.map",
+        "拍一张从正上方往下拍的场地照片，让视觉模型记住小车和障碍物在哪。之后用 self.blind.goto 去某个东西那里时，"
+        "小车闭着眼按规划好的绕障路线走，不再拍照。用户说“拍一张俯拍图/记住场地/重新拍地图/东西挪了”时调用；"
+        "如果用户已经说了要去哪，把目标填进 target，让视觉模型一定把它标出来；用户说了车头朝哪（“车头对着垃圾桶”“车头朝左”）"
+        "就原话填进 facing，比视觉模型自己判断准。返回结果里会说车头朝哪，用户说不对时带上 facing 重新调用。",
+        [Prop("target", "string", "接下来要去的东西（例如“红色盒子”），可以不填", default=""),
+         Prop("facing", "string", "用户说的车头朝向，原话照填：“对着垃圾桶”“朝左”“朝画面上方”；没说就不填", default="")],
+        blind.build,
+    )
+    mcp.add_tool(
+        "self.blind.goto",
+        "闭着眼走到地图上的某个东西旁边：按 self.blind.map 记住的场地规划绕开障碍物的路线，转向和前进按校准参数执行，"
+        "途中不拍照。用户说“去红色盒子那里/开到纸箱旁边”时调用（先要有 self.blind.map 记住的地图）。"
+        "where 选去目标的哪一侧（都是从小车看过去）：“绕到垃圾桶后面”=后面，“去盒子左边”=左边，"
+        "“绕着垃圾桶转一圈”=绕一圈（最后回到出发点），“撞倒纸杯/撞一下盒子”=撞倒（开到跟前正对它，冲过去再退回来；"
+        "只撞物品，绝不撞人或动物）。路线会自动绕开目标和其他障碍物，最后转身对着目标。"
+        "位置是估计的，走过几段后会越来越不准，用户觉得偏了就重新 self.blind.map。",
+        [Prop("target", "string", "要去的东西，用地图里的名字"),
+         Prop("where", "string", "去目标的哪一侧，或者撞倒它",
+              enum=["旁边", "后面", "左边", "右边", "绕一圈", "撞倒"], default="旁边")],
+        blind.goto,
+    )

@@ -1,6 +1,7 @@
 """动作队列：按顺序执行、时长控制、安全约束。"停"绕过队列立即生效。"""
 
 import asyncio
+import math
 import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable
@@ -11,6 +12,8 @@ MAX_ACTION_MS = 5000
 MAX_QUEUE_MS = 15000
 FAILSAFE_SLACK_MS = 300
 MS_PER_90_AT_FULL = 400  # 满速原地转 90° 需要的毫秒数（2026-10-24 实车落地实测：400ms ≈ 90°）
+MAX_TURN_CHUNK_DEG = 90  # 原地转向一次最多转这么多：实测满速 0.2s=45°、0.4s=90°、0.6s≈180°（转久了越转越快）
+TURN_PAUSE_S = 0.3  # 大角度拆成几段，段间停这么久，让车停稳再转（每段都从静止起步，才在校准过的线性区间里）
 MAX_BARREL_MS = 1500  # 俯仰有机械限位，转太久会顶住舵机
 # 炮管俯仰是 SERVO1 上的连续旋转舵机（原厂右肩摇杆上下控制），速度 45 与原厂一致；
 # 正负号决定哪边是“抬高”，2026-10-24 实车发现装反过一次，以实测为准
@@ -46,8 +49,10 @@ class TankExecutor:
         fire_pulse_ms: int = 500,
         fire_cooldown_s: float = 1.5,
         max_shots: int = 3,
+        ms_per_90: int = MS_PER_90_AT_FULL,
     ):
         self.backend = backend
+        self.ms_per_90 = ms_per_90  # 满速原地转 90° 要多少毫秒：地面不同（地板/地毯）差别很大，要现场校准
         self.max_speed = max_speed
         self.fire_enabled = fire_enabled
         self.fire_pulse_ms = fire_pulse_ms
@@ -59,6 +64,7 @@ class TankExecutor:
         self._current: asyncio.Task | None = None
         self._current_desc: str | None = None
         self._manual_t = -1e9  # 最近一次手柄指令的时间
+        self.command_seq = 0  # 每来一个动作/任务/手柄指令就加 1：情绪小动作据此判断“指令是不是马上就来了”
         self._mission: asyncio.Task | None = None  # 闭环任务（如看图寻的），同一时间只有一个
         self._mission_desc: str | None = None
         self._worker: asyncio.Task | None = None
@@ -152,6 +158,7 @@ class TankExecutor:
         if queued + action.duration_ms > MAX_QUEUE_MS:
             raise ValueError("动作排太多了，先等当前动作做完或说“停”")
         self._queue.append(action)
+        self.command_seq += 1
         self._wakeup.set()
         return f"已安排：{action.desc}"
 
@@ -166,6 +173,7 @@ class TankExecutor:
             if self._current and not self._current.done():
                 self._current.cancel()  # 被取消的动作会在 finally 里 halt
         self._mission_desc = desc
+        self.command_seq += 1
         self._mission = asyncio.create_task(self._guard_mission(desc, run))
         return f"开始：{desc}" + (f"（已停止之前的「{replaced}」）" if replaced else "")
 
@@ -202,6 +210,7 @@ class TankExecutor:
                     break
                 await asyncio.sleep(0.01)
         self._manual_t = time.monotonic()
+        self.command_seq += 1
         clip = lambda v: max(-self.max_speed, min(int(v), self.max_speed))  # noqa: E731
         left, right, barrel = clip(left), clip(right), max(-1, min(int(barrel), 1))
         if not (left or right or barrel):
@@ -286,14 +295,24 @@ class TankExecutor:
         s = self._speed(speed)
         # 只在满速下校准过：低速时履带打滑严重，80% 速度实测转速不到一半，所以语音转向固定满速。
         # 只有 --max-speed 限速时才会低于满速，那时按比例换算只是近似
-        ms = min(int(int(angle) / 90 * MS_PER_90_AT_FULL * 100 / max(s, 1)), MAX_ACTION_MS)
+        # 超过 90° 拆成几段等分（124° → 62° + 62°），每段之间停一下
+        n = max(1, math.ceil(int(angle) / MAX_TURN_CHUNK_DEG))
+        chunk_ms = min(int(int(angle) / n / 90 * self.ms_per_90 * 100 / max(s, 1)), MAX_ACTION_MS)
+        ms = chunk_ms * n + int(TURN_PAUSE_S * 1000) * (n - 1)
         # 原地转向：两条履带反向，比单侧履带转快一倍、几乎不画弧
         left, right = (-s, s) if direction == "left" else (s, -s)
         name = "左转" if direction == "left" else "右转"
         self._record(f"{name} {int(angle)}")
         deg = float(angle) if direction == "left" else -float(angle)
-        return self._enqueue(Action(f"{name} {int(angle)}° {ms}ms", ms, lambda: self._drive_for(left, right, ms),
-                                    "turn", deg))
+
+        async def run():
+            for i in range(n):
+                if i:
+                    await asyncio.sleep(TURN_PAUSE_S)
+                await self._drive_for(left, right, chunk_ms)
+
+        desc = f"{name} {int(angle)}° {chunk_ms}ms" + (f"×{n}" if n > 1 else "")
+        return self._enqueue(Action(desc, ms, run, "turn", deg))
 
     def barrel(self, direction: str, duration_ms: int) -> str:
         sp = BARREL_UP_SPEED if direction == "up" else -BARREL_UP_SPEED

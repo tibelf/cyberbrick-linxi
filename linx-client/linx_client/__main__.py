@@ -22,10 +22,13 @@ def _add_tank_args(p: argparse.ArgumentParser):
     p.add_argument("--host", help="Wi-Fi 模式下车的 IP，不填则局域网广播自动查找")
     p.add_argument("--max-speed", type=int, default=100, help="速度上限 0-100（车架空首测时可设 40）")
     p.add_argument("--no-fire", action="store_true", help="锁定发射功能")
+    p.add_argument("--turn-ms-per-90", type=int, default=400,
+                   help="满速原地转 90° 要多少毫秒（换了地面要重新校准：转多了就调小，转少了就调大）")
 
 
 def _make_tank(args) -> TankExecutor:
-    return TankExecutor(make_backend(args.backend, args.port, args.host), max_speed=args.max_speed, fire_enabled=not args.no_fire)
+    return TankExecutor(make_backend(args.backend, args.port, args.host), max_speed=args.max_speed,
+                        fire_enabled=not args.no_fire, ms_per_90=args.turn_ms_per_90)
 
 
 def _ask_wifi_config(default_ssid: str) -> dict:
@@ -220,6 +223,10 @@ async def _run(args):
     # 打靶挑战：网页控制台显示计分板（on_change 在网页启动后接上）
     game = TargetChallenge(tank, Path(args.state).with_name(".leaderboard.json"), say=lambda text: session.say(text))
     register_game_tools(mcp, game)
+    if args.blind_view_cm and not args.blind:
+        print("⚠️  --blind-view-cm 只在加了 --blind（闭眼导航）时才有用，这次没开闭眼导航")
+    if args.blind and not args.camera:
+        print("⚠️  --blind 要配合 --camera 才能拍俯拍图，这次没开闭眼导航")
     photo = None
     if args.camera:
         from .camera import PhotoTool, make_camera
@@ -252,7 +259,22 @@ async def _run(args):
                                   on_photo=publish, navigator=navigator)
             print("🔳 标记跟踪：车顶 0 号标记，目标 " + (args.marker_targets or "1–9 号标记或颜色")
                   + f"；地图锚点 {args.anchor_id} 号（平放在地上，说“拍一张地图”建图）")
-        register_camera_tools(mcp, photo, view=args.camera_view, seeker=seeker, wanderer=wanderer)
+        if args.blind:
+            from .blind import BlindNavigator
+            from .tools import register_blind_tools
+
+            # 一张俯拍图规划、闭眼走完：只在 self.blind.map 时拍一次照片交给视觉模型
+            blind = BlindNavigator(tank, photo.ask, frame=getattr(photo.camera, "frame", None),
+                                   say=lambda text: session.say(text), cm_per_s=args.blind_cm_per_s,
+                                   facing=args.blind_facing, view_cm=args.blind_view_cm,
+                                   on_map=lambda *a: photo.on_photo and photo.on_photo(*a))
+            register_blind_tools(mcp, blind)
+            print(f"🙈 闭眼导航：直行按 {args.blind_cm_per_s} cm/s 换算，车头朝向"
+                  + ("约定朝画面上方" if args.blind_facing == "up" else "按炮管尖判断"))
+        # 闭眼模式：用户要的是“只拍一张、后面不拍”，去哪/撞倒都走 self.blind.goto，
+        # 不注册边看边找的 seek，免得大模型选它（它会一直拍照）
+        register_camera_tools(mcp, photo, view=args.camera_view, seeker=None if args.blind else seeker,
+                              wanderer=wanderer)
         print(f"📷 摄像头：{args.camera}（需在智控台开启视觉分析）")
     else:
         from .tools import register_wander_tool
@@ -456,6 +478,14 @@ def main():
     _add_tank_args(p_pad)
     p_pad.add_argument("--web-port", type=int, default=8080, help="网页端口")
     p_run.add_argument("--camera", help="开启拍照工具：0=电脑摄像头序号（0:1920x1440 = 指定分辨率），http://…=JPEG 快照地址，其他=图片文件")
+    p_run.add_argument("--blind", action="store_true",
+                       help="一张俯拍图规划、闭眼走完（需要 --camera）：说“拍一张俯拍图”记住场地，之后去哪都不再拍照")
+    p_run.add_argument("--blind-cm-per-s", type=float, default=26.0,
+                       help="速度 80 直行每秒多少厘米（地毯上实测约 26；换地面或电量低时重新量）")
+    p_run.add_argument("--blind-view-cm", type=float,
+                       help="照片横向拍到的地面有多宽（厘米，摄像头不动时量一次）；不填就按坦克外框估，容易差一倍")
+    p_run.add_argument("--blind-facing", choices=["auto", "up"], default="auto",
+                       help="auto=让视觉模型按炮管尖判断车头朝向（会说出来），up=约定拍照前车头朝画面上方")
     p_run.add_argument("--camera-view", choices=["overhead", "front"], default="overhead",
                        help="overhead=摄像头固定在场地旁边（俯拍或斜拍，越高越好），front=摄像头装在车上朝前")
 

@@ -194,3 +194,53 @@ def test_manual_takes_over_and_blocks_emotes():
         await tank.close()
 
     run(main())
+
+
+def test_mood_skips_wiggle_when_command_follows(monkeypatch):
+    """平台先发情绪、紧接着发“前进”：不能先原地扭一下再走。"""
+    from linx_client.tank import mood as mood_mod
+
+    monkeypatch.setattr(mood_mod, "EMOTE_DELAY_S", 0.1)
+
+    async def main():
+        be = MockBackend(verbose=False)
+        tank = TankExecutor(be, max_speed=100)
+        await tank.start()
+        m = mood_mod.Mood(tank)
+        assert m.on_emotion("happy") == "happy"
+        tank.move("forward", 200, 80)  # 指令紧跟着到
+        await asyncio.sleep(0.3)
+        await drain(tank)
+        drives = [c[1:3] for c in be.calls if c[0] == "drive"]
+        assert drives == [(80, 80)]  # 只有直行，没有原地扭
+        assert ("led", 0, 40, 0) in be.calls  # 车灯照样变色
+
+        m2 = mood_mod.Mood(tank)  # 没有指令跟着：照常扭一扭
+        be.calls.clear()
+        m2.on_emotion("happy")
+        await asyncio.sleep(0.2)
+        await drain(tank)
+        await tank.close()
+        assert any(c[0] == "drive" and c[1] == -c[2] for c in be.calls)
+
+    run(main())
+
+
+def test_big_turns_split_into_chunks_up_to_90():
+    """实测满速 0.4s=90°、0.6s≈180°：超过 90° 要拆成几段从静止起步，不能一口气转。"""
+    async def main():
+        be = MockBackend(verbose=False)
+        tank = TankExecutor(be, max_speed=100)
+        await tank.start()
+        tank.turn("left", 124)
+        tank.turn("right", 90)
+        tank.turn("left", 360)
+        await drain(tank)
+        await tank.close()
+        drives = [c for c in be.calls if c[0] == "drive"]
+        assert [c[3] - 300 for c in drives[:2]] == [275, 275]  # 124° = 62° + 62°，各 275ms
+        assert drives[2][1:3] == (100, -100) and drives[2][3] - 300 == 400  # 90° 一次转完
+        assert [c[3] - 300 for c in drives[3:]] == [400] * 4  # 一圈 = 4 × 90°
+        assert be.calls[be.calls.index(drives[0]) + 1] == ("halt",)  # 段与段之间先停
+
+    run(main())
