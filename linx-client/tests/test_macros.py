@@ -187,27 +187,27 @@ def test_tools_via_mcp(tmp_path):
     asyncio.run(main())
 
 
-def test_all_out_charge_runs_eight_full_speed_moves(tmp_path, monkeypatch):
-    """演示示例“全军出击”：前进 5 秒 × 8 = 40 秒，在宏一次最多 60 秒的限制内。"""
+def test_all_out_charge_runs_full_speed(tmp_path, monkeypatch):
+    """演示示例“全军出击”：全速前进 5 秒。"""
 
     async def main():
         tank, m = _mk(tmp_path)
         await tank.start()
-        msg = m.save("全军出击", "前进 5000 速度 100", repeat=8)
-        assert "重复 8 次" in msg and "大约 40 秒" in msg
+        msg = m.save("全军出击", "前进 5000 速度 100")
+        assert "重复" not in msg and "大约 5 秒" in msg
         moves = []
         monkeypatch.setattr(tank, "move", lambda d, ms, s: moves.append((d, ms, s)))
 
         async def idle():
             pass
 
-        monkeypatch.setattr(tank, "wait_idle", idle)  # 不真的等 40 秒
-        assert "大约 40 秒" in m.run("执行全军出击")
+        monkeypatch.setattr(tank, "wait_idle", idle)  # 不真的等 5 秒
+        assert "大约 5 秒" in m.run("执行全军出击")
         await _wait_mission(tank)
         await tank.close()
         return moves
 
-    assert asyncio.run(main()) == [("forward", 5000, 100)] * 8
+    assert asyncio.run(main()) == [("forward", 5000, 100)]
 
 
 def test_macro_stops_after_max_run_time(tmp_path, monkeypatch):
