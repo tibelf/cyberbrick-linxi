@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/images/logo.png" width="480" alt="菜鸟 No.1"></p>
+
 # CyberBrick 语音坦克
 
 [![tests](https://img.shields.io/github/actions/workflow/status/tibelf/cyberbrick-linxi/tests.yml?branch=main&label=tests&logo=github)](https://github.com/tibelf/cyberbrick-linxi/actions/workflows/tests.yml)
