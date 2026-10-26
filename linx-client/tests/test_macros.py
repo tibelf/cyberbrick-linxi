@@ -188,7 +188,7 @@ def test_tools_via_mcp(tmp_path):
 
 
 def test_all_out_charge_runs_eight_full_speed_moves(tmp_path, monkeypatch):
-    """主打场景“全军出击”：前进 5 秒 × 8 = 40 秒，在宏一次最多 60 秒的限制内。"""
+    """演示示例“全军出击”：前进 5 秒 × 8 = 40 秒，在宏一次最多 60 秒的限制内。"""
 
     async def main():
         tank, m = _mk(tmp_path)

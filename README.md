@@ -3,7 +3,7 @@
 [![tests](https://img.shields.io/github/actions/workflow/status/tibelf/cyberbrick-linxi/tests.yml?branch=main&label=tests&logo=github)](https://github.com/tibelf/cyberbrick-linxi/actions/workflows/tests.yml)
 [![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/tibelf/cyberbrick-linxi/badges/coverage.json)](https://github.com/tibelf/cyberbrick-linxi/actions/workflows/tests.yml)
 
-七牛 Hackathon「智能硬件」课题：一辆能发射子弹的 CyberBrick Mini T 履带车，接入**灵矽（Linx）**语音交互。对它说「往前走两秒，左转，开一炮」，它会照做并语音回应。没有灵矽实体硬件，由电脑模拟一台灵矽设备，通过 Wi-Fi 控车。
+一辆能发射子弹的 CyberBrick Mini T 履带车，接入**灵矽（Linx）**语音交互。对它说「往前走两秒，左转，开一炮」，它会照做并语音回应。没有灵矽实体硬件，由电脑模拟一台灵矽设备，通过 Wi-Fi 控车。
 
 <p>
   <img src="docs/images/tank-front.jpg" width="49%" alt="小车正面">
@@ -14,7 +14,7 @@
 
 1. **发射炮弹、绕杯子一圈**
 2. **跳舞**
-3. **全军出击**：全速前进 40 秒
+3. **录制动作宏**：用语音教小车一套动作并起个名字，以后说名字就执行（示例：「全军出击」= 全速前进 40 秒）
 4. **闲逛**：自己在屋里探索，随机挑方向和距离
 5. **老爷爷模式**：慢悠悠地开，走一会歇一会
 
