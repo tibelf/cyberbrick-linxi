@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#111317">
+<title>坦克手柄</title>
+<style>
+  :root {
+    --bg: #111317; --panel: #1b1e25; --line: #2c313b; --text: #eceef2; --muted: #8b92a1;
+    --accent: #5b8cff; --good: #3ccf7e; --bad: #ff4d4d; --fire: #ff8a1f;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
+  body {
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    display: grid; grid-template-rows: auto 1fr; height: 100dvh;
+    padding: max(10px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+             max(10px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  }
+  header { display: flex; align-items: center; gap: 10px; min-height: 52px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); flex: none; }
+  .dot.on { background: var(--good); }
+  #status { flex: 1; min-width: 0; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #stop {
+    flex: none; border: 0; border-radius: 12px; padding: 12px 22px; font: inherit; font-size: 17px;
+    font-weight: 700; letter-spacing: .15em; color: #fff; background: var(--bad);
+  }
+  main { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 16px; min-height: 0; }
+  #stick {
+    justify-self: center; position: relative; border-radius: 50%;
+    width: min(44vw, 72dvh, 300px); aspect-ratio: 1;
+    background: radial-gradient(circle, #232733 0%, #1b1e25 70%); border: 2px solid var(--line);
+  }
+  #stick::before, #stick::after { content: ""; position: absolute; background: var(--line); }
+  #stick::before { left: 50%; top: 12%; bottom: 12%; width: 2px; transform: translateX(-1px); }
+  #stick::after { top: 50%; left: 12%; right: 12%; height: 2px; transform: translateY(-1px); }
+  #knob {
+    position: absolute; left: 50%; top: 50%; width: 38%; aspect-ratio: 1; border-radius: 50%;
+    transform: translate(-50%, -50%); background: var(--accent); box-shadow: 0 4px 16px rgba(0,0,0,.4); z-index: 1;
+  }
+  #stick.active #knob { background: #7aa3ff; }
+  .label { position: absolute; color: var(--muted); font-size: 12px; }
+  .l-up { top: 3%; left: 50%; transform: translateX(-50%); }
+  .l-down { bottom: 3%; left: 50%; transform: translateX(-50%); }
+  .l-left { left: 4%; top: 50%; transform: translateY(-50%); }
+  .l-right { right: 4%; top: 50%; transform: translateY(-50%); }
+  .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; justify-self: center; width: min(44vw, 340px); }
+  .btn {
+    border: 2px solid var(--line); background: var(--panel); color: var(--text); border-radius: 16px;
+    font: inherit; font-size: 16px; font-weight: 600; padding: 0; height: min(16dvh, 76px);
+  }
+  .btn.held { background: var(--accent); border-color: var(--accent); }
+  #fire {
+    grid-column: 1 / -1; height: min(26dvh, 120px); font-size: 24px; letter-spacing: .2em;
+    border-color: var(--fire); color: var(--fire); background: rgba(255,138,31,.08);
+  }
+  #fire.held { background: var(--fire); color: #111; }
+  #hint { display: none; }
+  @media (orientation: portrait) {
+    main { grid-template-columns: 1fr; grid-template-rows: auto auto; align-content: center; gap: 28px; }
+    #stick { width: min(70vw, 300px); }
+    .buttons { width: min(86vw, 380px); }
+    #hint { display: block; text-align: center; color: var(--muted); font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <span id="status">连接中…</span>
+  <button id="stop">急停</button>
+</header>
+<main>
+  <div id="stick">
+    <span class="label l-up">前进</span><span class="label l-down">后退</span>
+    <span class="label l-left">左转</span><span class="label l-right">右转</span>
+    <div id="knob"></div>
+  </div>
+  <div class="buttons">
+    <button class="btn" data-barrel="1">炮管 ↑</button>
+    <button class="btn" data-barrel="-1">炮管 ↓</button>
+    <button class="btn" id="fire">开火</button>
+    <button class="btn" id="dance" style="grid-column: 1 / -1; height: min(11dvh, 52px); font-size: 14px;">跳舞</button>
+    <div id="hint" style="grid-column: 1 / -1">横过来更好操作</div>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const key = new URLSearchParams(location.search).get("k") || "";
+const DEAD = 0.12;      // 摇杆死区
+const MIN_POWER = 55;   // 实测 40% 带不动履带：有效输入从 55% 起步
+let ws, sx = 0, sy = 0, barrel = 0, wasActive = false;
+
+function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
+
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws?k=${encodeURIComponent(key)}`);
+  ws.onopen = () => $("dot").classList.add("on");
+  ws.onclose = () => { $("dot").classList.remove("on"); $("status").textContent = "已断开，重连中…"; setTimeout(connect, 1000); };
+  ws.onmessage = (ev) => {
+    const e = JSON.parse(ev.data);
+    const s = e.status;
+    if (s) $("status").textContent = `${s.current || s.mission || "空闲"} · 已发 ${s.shots_fired} 发` + (s.fire_enabled ? "" : " · 发射锁定");
+    if (e.type === "error") $("status").textContent = "⚠ " + e.text;
+  };
+}
+
+// 摇杆 → 两条履带：y 前后，x 原地转；每条履带的有效值映射到 MIN_POWER..100
+function power(v) {
+  if (Math.abs(v) < 0.08) return 0;
+  return Math.sign(v) * Math.round(MIN_POWER + (100 - MIN_POWER) * Math.min(1, Math.abs(v)));
+}
+function tracks() {
+  const mag = Math.hypot(sx, sy);
+  if (mag < DEAD) return [0, 0];
+  const l = Math.max(-1, Math.min(1, sy + sx)), r = Math.max(-1, Math.min(1, sy - sx));
+  return [power(l), power(r)];
+}
+
+// 每 0.1 秒发一次当前状态（车上看门狗 0.4 秒），松手时补发一次全零让车立刻停
+setInterval(() => {
+  const [l, r] = tracks();
+  const active = l !== 0 || r !== 0 || barrel !== 0;
+  if (active || wasActive) send({ type: "pad", l, r, barrel });
+  wasActive = active;
+}, 100);
+
+const stick = $("stick"), knob = $("knob");
+let stickId = null;
+function moveStick(ev) {
+  const rect = stick.getBoundingClientRect();
+  const R = rect.width / 2;
+  let dx = ev.clientX - (rect.left + R), dy = ev.clientY - (rect.top + R);
+  const d = Math.hypot(dx, dy), maxD = R * 0.7;
+  if (d > maxD) { dx *= maxD / d; dy *= maxD / d; }
+  sx = dx / maxD; sy = -dy / maxD;
+  knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+}
+function releaseStick() {
+  stickId = null; sx = sy = 0;
+  knob.style.transform = "translate(-50%, -50%)";
+  stick.classList.remove("active");
+}
+stick.addEventListener("pointerdown", (ev) => {
+  stickId = ev.pointerId; stick.setPointerCapture(ev.pointerId); stick.classList.add("active"); moveStick(ev);
+});
+stick.addEventListener("pointermove", (ev) => { if (ev.pointerId === stickId) moveStick(ev); });
+["pointerup", "pointercancel", "lostpointercapture"].forEach((t) =>
+  stick.addEventListener(t, (ev) => { if (ev.pointerId === stickId) releaseStick(); }));
+
+// 炮管：按住动，松手停
+document.querySelectorAll("[data-barrel]").forEach((b) => {
+  const v = Number(b.dataset.barrel);
+  b.addEventListener("pointerdown", (ev) => { b.setPointerCapture(ev.pointerId); barrel = v; b.classList.add("held"); });
+  ["pointerup", "pointercancel", "lostpointercapture"].forEach((t) =>
+    b.addEventListener(t, () => { if (barrel === v) barrel = 0; b.classList.remove("held"); }));
+});
+
+function tap(el, fn) {
+  el.addEventListener("pointerdown", () => { el.classList.add("held"); fn(); });
+  ["pointerup", "pointercancel", "pointerleave"].forEach((t) => el.addEventListener(t, () => el.classList.remove("held")));
+}
+tap($("fire"), () => { send({ type: "action", name: "fire" }); navigator.vibrate?.(60); });
+tap($("dance"), () => send({ type: "action", name: "dance" }));
+tap($("stop"), () => { releaseStick(); barrel = 0; send({ type: "stop" }); navigator.vibrate?.([40, 40, 40]); });
+
+// 切到后台时立刻停（锁屏、切 App）
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { releaseStick(); barrel = 0; send({ type: "pad", l: 0, r: 0, barrel: 0 }); }
+});
+document.addEventListener("contextmenu", (ev) => ev.preventDefault());
+
+connect();
+</script>
+</body>
+</html>

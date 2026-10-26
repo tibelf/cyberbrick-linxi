@@ -175,3 +175,22 @@ def test_mood_rate_limits(monkeypatch):
         assert ("led", 40, 30, 0) in be.calls and ("led", 0, 40, 0) in be.calls
 
     run(main())
+
+
+def test_manual_takes_over_and_blocks_emotes():
+    async def main():
+        be = MockBackend(verbose=False)
+        tank = TankExecutor(be, max_speed=70)
+        await tank.start()
+        tank.move("forward", 3000, 80)
+        await asyncio.sleep(0.05)
+        await tank.manual(100, 20, -1)  # 手动优先：语音排的前进被打断
+        assert not tank.busy and tank.manual_active
+        assert ("drive", 70, 20, 400) in be.calls and ("turret", -45, 400) in be.calls
+        assert tank.emote("happy") is None  # 手动期间不插情绪动作
+        be.calls.clear()
+        await tank.manual(0, 0, 0)
+        assert be.calls == [("halt",)]
+        await tank.close()
+
+    run(main())

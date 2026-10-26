@@ -12,3 +12,5 @@ map-test*.png
 markers.svg
 *.jpg
 *.jpeg
+.macros.json
+.leaderboard.json

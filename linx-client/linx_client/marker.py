@@ -86,7 +86,8 @@ class Sighting:
     target: bool = False
     bearing: float | None = None  # 目标在车头的哪边：度，左正右负
     distance: float | None = None  # 车中心到目标，厘米（水平面内）
-    target_tilt: float | None = None  # 目标标记和地面的夹角（度），用来判断撞倒了没有；颜色目标没有
+    target_height: float | None = None  # 目标标记中心离地多高（厘米），用来判断撞倒了没有；颜色目标没有
+    # （不用标记的倾角：斜着看的小标记，朝向常被解反，立着的测出 67°、倒下的测出 21° 都见过；位置要稳得多）
     target_id: int | None = None
     corners: dict | None = None  # 画调试图用：{id: 4x2 角点}
     target_px: tuple | None = None  # 颜色目标的贴地点（像素）
@@ -226,8 +227,7 @@ class MarkerTracker:
                     Rt, tt = tp
                     p = R.T @ (tt - t)
                     xy = float(p[0]), float(p[1])
-                    n = R.T @ Rt[:, 2]  # 目标标记的法线，在车身坐标系里
-                    s.target_tilt = math.degrees(math.asin(min(1.0, abs(float(n[2])))))
+                    s.target_height = float(p[2]) + self.car_height_cm  # 车身坐标系原点在车顶，地面在 −car_height
                     s.target_id = mid
         if xy is not None and self.flip:
             xy = -xy[0], -xy[1]  # 车头其实是标记的 -y 方向

@@ -4,7 +4,8 @@
 - 偏得多（> PIVOT_DEG）：先停，用校准过的原地转向转过去（低速原地转会打滑，所以不用连续小转）
 - 偏得少：两条履带差速，一边往前开一边把车头掰正；离得近了减速
 - 走到（< ARRIVE_CM）就停；hit 时靠近后全速撞上去，再看目标倒了没有
-- 看不到车或目标：立刻停车等，LOST_S 秒还看不到就放弃并说明原因
+- 看不到车或目标：立刻停车等，LOST_S 秒还看不到就放弃并说明原因；但车已经贴到目标跟前时目标突然不见，
+  多半是车身挡住了它（车在摄像头和目标之间），按最后一次看到的位置走到/撞上去
 - 往前开却越开越远：车顶标记贴反了，自动把车头方向反过来算并提醒（2026-10-25 用户实测“去撞目标却往反方向跑”）
 车顶没贴标记、目标既没有标记也说不出颜色时，退回视觉模型版（fallback）。
 所有动作走 TankExecutor：steer 每条只管 0.4 秒（画面卡住车就自己停），速度裁剪到限速，stop() 随时取消。
@@ -13,6 +14,7 @@
 import asyncio
 import statistics
 import time
+from collections import deque
 from typing import Awaitable, Callable
 
 from .marker import MarkerTracker, Sighting, Target, resolve_target
@@ -31,10 +33,11 @@ FAR_SPEED, NEAR_SPEED, NEAR_CM = 80, 65, 35.0
 STEER_GAIN = 1.0  # 每偏 1 度，两条履带速度差多少
 MAX_DIFF = 25
 LOST_S = 8.0
+OCCLUDED_S = 1.5  # 目标刚消失这么久以内、车又已经贴到跟前，当作被车身挡住了
 NO_MARKER_FALLBACK_S = 2.0  # 一开始这么久都看不到车顶标记，就改用视觉模型版
 TIME_LIMIT_S = 120.0
 PUBLISH_S = 1.0  # 网页控制台每秒刷新一张调试图
-KNOCKED_TILT_DEG = 30.0  # 目标标记倾角变化超过这么多算倒了（立着时测出来只差几度；倒下后有的角度只测出约 40°）
+KNOCKED_DROP_CM = 4.0  # 目标标记离地高度比靠近时矮了这么多，算倒了（立着的瓶子上约 10cm，倒下后只剩几厘米）
 # 往前开着（偏角不大）却越开越远：车顶标记贴反了（箭头朝车尾），程序以为的车头其实是车尾
 REVERSE_CHECK_S = 0.3  # 至少隔这么久的两次观测
 REVERSE_CM = 6.0  # 距离变大超过 max(这么多, 10%) 才算（手持时距离会有几厘米的抖动）
@@ -59,6 +62,7 @@ class MarkerSeeker:
         self.lost_s = lost_s
         self.loop_s = loop_s
         self._last_pub = 0.0
+        self._heights: deque = deque(maxlen=20)
         self.navigator = navigator  # navigate.Navigator：有地图时先沿地图路线绕开障碍物开到目标附近
 
     def __call__(self, target: str, goal: str = "approach", fire: bool = False) -> str:
@@ -164,7 +168,21 @@ class MarkerSeeker:
         await self.tank.wait_idle()
         await asyncio.sleep(0.4)
 
-    async def _knocked(self, spec: Target, target: str, before: Sighting) -> bool:
+    async def _after_ram(self, spec: Target, target: str, before: Sighting, rams: int):
+        """撞完一次：倒了 → 完成；确定没倒 → 返回 None 再撞（最多 MAX_RAMS 次）；看不出 → 如实说撞上了，不再瞎撞。"""
+        k = await self._knocked(spec, target, before)
+        if k is True:
+            return True, f"已把{target}撞倒了"
+        if k is None:
+            return True, f"已经撞上{target}了（没开视觉分析，看不出倒没倒）"
+        if rams >= MAX_RAMS:
+            return False, f"撞了 {rams} 次，{target}还没倒"
+        return None
+
+    async def _knocked(self, spec: Target, target: str, before: Sighting) -> bool | None:
+        """True = 倒了，False = 确定没倒（只有视觉模型能这么肯定），None = 看不出。
+        只靠标记判断不可靠：小标记斜着看，车顶和目标的朝向都可能被解反（2026-10-25 仿真里立着测出 67°、倒下测出 21°，
+        离地高度也被带偏过），所以标记只用来确认“明显倒了”（不见了、明显矮了），其余算看不出。"""
         if self.ask:
             try:
                 a = await self.ask(f"画面里的{target}是不是已经倒下、被撞翻或被撞开了？只回答“是”或“否”，不要解释。")
@@ -173,22 +191,25 @@ class MarkerSeeker:
                     return yes
             except Exception as e:  # noqa: BLE001 — 没开视觉分析等：用标记自己判断
                 print(f"[marker-seek] 视觉确认失败，改用标记判断：{e}")
-        tilts, dists, missing = [], [], 0
-        for _ in range(5):  # 看几帧取中位数，单帧测的倾角可能偏
+        heights, dists, missing = [], [], 0
+        for _ in range(5):  # 看几帧取中位数
             s = await self._look(spec)
             if s.car:
                 if not s.target:
                     missing += 1
                 else:
                     dists.append(s.distance)
-                    if s.target_tilt is not None:
-                        tilts.append(s.target_tilt)
+                    if s.target_height is not None:
+                        heights.append(s.target_height)
             await asyncio.sleep(self.loop_s)
         if missing >= 3:
             return True  # 目标不见了（倒下后标记朝下，或被撞出画面）
-        if tilts and before.target_tilt is not None:
-            return abs(statistics.median(tilts) - before.target_tilt) > KNOCKED_TILT_DEG
-        return bool(dists) and statistics.median(dists) > before.distance + 10  # 颜色目标：被撞远了
+        base = statistics.median(self._heights) if len(self._heights) >= 3 else None
+        if heights and base is not None and statistics.median(heights) < base - KNOCKED_DROP_CM:
+            return True  # 标记一下子矮了：倒了
+        if not heights and dists and statistics.median(dists) > before.distance + 10:
+            return True  # 颜色目标：被撞远了
+        return None
 
     # ---- 主循环 ----
     async def _loop(self, target: str, spec: Target, goal: str):
@@ -199,6 +220,8 @@ class MarkerSeeker:
         seen_car = False
         rams = 0
         fwd_since = fwd_d0 = None  # 这一段连续往前开从什么时候、多远开始
+        last_seen = None  # 最近一次同时看到车和目标：(Sighting, 时间)
+        self._heights = deque(maxlen=20)
         try:
             while True:
                 now = time.monotonic()
@@ -206,6 +229,25 @@ class MarkerSeeker:
                     return False, f"找了 {round(now - t0)} 秒还没{verb}{target}，先停下"
                 s = await self._look(spec)
                 seen_car = seen_car or s.car
+                if s.car and not s.target and last_seen and now - last_seen[1] < OCCLUDED_S \
+                        and last_seen[0].distance <= RAM_ZONE_CM * 1.3:
+                    # 车已经贴到目标跟前、目标突然看不见：多半是车身挡住了目标（车在摄像头和目标之间），按最后看到的算
+                    ls = last_seen[0]
+                    if goal == "approach" and ls.distance <= ARRIVE_CM + 8:
+                        return True, f"已走到{target}跟前"
+                    last_seen = None
+                    if goal == "hit" and abs(ls.bearing) <= RAM_ALIGN_DEG and ls.distance <= RAM_ZONE_CM:
+                        rams += 1
+                        await self._ram()
+                        r = await self._after_ram(spec, target, ls, rams)
+                        if r:
+                            return r
+                        continue
+                    # 没对正就别瞎撞：往后退一点，让目标重新露出来，再对一次
+                    await self.tank.halt_now()
+                    self.tank.move("backward", 350, 70)
+                    await self.tank.wait_idle()
+                    continue
                 if not (s.car and s.target):
                     fwd_since = None
                     await self.tank.halt_now()  # 看不到就别闭着眼开
@@ -222,6 +264,9 @@ class MarkerSeeker:
                     await asyncio.sleep(self.loop_s)
                     continue
                 lost_since = None
+                last_seen = (s, now)
+                if s.target_height is not None:
+                    self._heights.append(s.target_height)  # 靠近过程中的离地高度，撞完拿来比
                 b, d = s.bearing, s.distance
                 if goal == "aim":
                     if abs(b) <= AIM_TOLERANCE_DEG:
@@ -242,10 +287,9 @@ class MarkerSeeker:
                 if goal == "hit" and d <= RAM_ZONE_CM and abs(b) <= RAM_ALIGN_DEG:
                     rams += 1
                     await self._ram()
-                    if await self._knocked(spec, target, s):
-                        return True, f"已把{target}撞倒了"
-                    if rams >= MAX_RAMS:
-                        return False, f"撞了 {rams} 次，{target}还没倒"
+                    r = await self._after_ram(spec, target, s, rams)
+                    if r:
+                        return r
                     continue
                 # 要撞的目标近在眼前时必须先对正再走：斜着往前蹭会从目标旁边擦过去
                 pivot = RAM_ALIGN_DEG if goal == "hit" and d <= RAM_ZONE_CM * 1.5 else PIVOT_DEG

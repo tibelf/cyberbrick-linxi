@@ -196,7 +196,7 @@ def test_seek_hits_target_behind_box_via_map():
     w = scene()
     said, summary = asyncio.run(_seek(w, "绿色瓶子", "hit", labels={1: "绿色瓶子"}))
     assert "地图建好了" in summary
-    assert said[0] == "已把绿色瓶子撞倒了", said
+    assert said[0] in ("已把绿色瓶子撞倒了", "已经撞上绿色瓶子了（没开视觉分析，看不出倒没倒）"), said
     assert w.fallen and not w.collided
 
 

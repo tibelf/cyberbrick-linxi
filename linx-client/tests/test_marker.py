@@ -145,6 +145,18 @@ def test_aim_turns_in_place():
 def test_hit_knocks_target_over():
     world = World(car=(0, 0, 0.3), target=(60, 30), cam=(-40, -60, 70))
     said = asyncio.run(_run(world, goal="hit", time_limit_s=20))
+    # 没开视觉分析：标记明显倒了就说撞倒，看不出就如实说“撞上了”——但只撞一次就停，不会一直撞
+    assert said[0] in ("已把绿色瓶子撞倒了", "已经撞上绿色瓶子了（没开视觉分析，看不出倒没倒）") and world.fallen
+
+
+def test_hit_confirmed_by_vision_rams_again_if_still_standing():
+    world = World(car=(0, 0, 0.3), target=(60, 30), cam=(-40, -60, 70))
+    answers = iter(["否"])  # 第一次撞完视觉模型说没倒（比如只是擦到），之后照实回答
+
+    async def ask(q, frame=None):
+        return next(answers, "是" if world.fallen else "否")
+
+    said = asyncio.run(_run(world, goal="hit", time_limit_s=25, ask=ask))
     assert said[0] == "已把绿色瓶子撞倒了" and world.fallen
 
 
