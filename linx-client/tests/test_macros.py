@@ -185,3 +185,84 @@ def test_tools_via_mcp(tmp_path):
         await tank.close()
 
     asyncio.run(main())
+
+
+def test_all_out_charge_runs_full_speed(tmp_path, monkeypatch):
+    """演示示例“全军出击”：全速前进 5 秒。"""
+
+    async def main():
+        tank, m = _mk(tmp_path)
+        await tank.start()
+        msg = m.save("全军出击", "前进 5000 速度 100")
+        assert "重复" not in msg and "大约 5 秒" in msg
+        moves = []
+        monkeypatch.setattr(tank, "move", lambda d, ms, s: moves.append((d, ms, s)))
+
+        async def idle():
+            pass
+
+        monkeypatch.setattr(tank, "wait_idle", idle)  # 不真的等 5 秒
+        assert "大约 5 秒" in m.run("执行全军出击")
+        await _wait_mission(tank)
+        await tank.close()
+        return moves
+
+    assert asyncio.run(main()) == [("forward", 5000, 100)]
+
+
+def test_macro_stops_after_max_run_time(tmp_path, monkeypatch):
+    import linx_client.macros as macros_mod
+
+    monkeypatch.setattr(macros_mod, "MAX_RUN_S", 0.05)
+    said = []
+
+    async def main():
+        tank = TankExecutor(MockBackend(verbose=False))
+        await tank.start()
+
+        async def say(text):
+            said.append(text)
+
+        m = Macros(tank, tmp_path / ".macros.json", say=say)
+        m.save("发呆", "等待 30", repeat=10)
+        m.run("发呆")
+        await _wait_mission(tank)
+        await tank.close()
+
+    asyncio.run(main())
+    assert said and "还没完，先停下" in said[0]
+
+
+def test_self_calling_macro_is_rejected_and_old_kept(tmp_path):
+    _, m = _mk(tmp_path)
+    m.save("甲", "前进 100")
+    m.save("乙", "执行 甲")
+    with pytest.raises(ValueError, match="套动作太多层"):
+        m.save("甲", "执行 乙")  # 甲 → 乙 → 甲 …… 死循环
+    assert m.macros["甲"]["steps"] == ["前进 100"]  # 改坏之前的版本还在
+
+
+def test_list_delete_and_record_edge_cases(tmp_path):
+    tank, m = _mk(tmp_path)
+    for name in list(m.macros):
+        m.delete(name)
+    assert m.list() == "还没有记住任何动作"
+    with pytest.raises(ValueError, match="没有叫"):
+        m.delete("巡逻")
+    with pytest.raises(ValueError, match="没有叫"):
+        m.run("巡逻")
+    with pytest.raises(ValueError, match="没在学动作"):
+        m.record_stop("x")
+    m.record_start()
+    assert "没存" in m.record_stop()  # 不给名字 = 放弃
+    m.record_start()
+    with pytest.raises(ValueError, match="一个动作都没做"):
+        m.record_stop("空的")
+    with pytest.raises(ValueError, match="起个名字"):
+        m.save("  ", "前进 100")
+
+
+def test_corrupt_macro_file_falls_back_to_builtin(tmp_path):
+    (tmp_path / ".macros.json").write_text("{坏掉的 json", encoding="utf-8")
+    _, m = _mk(tmp_path)
+    assert set(m.macros) == set(BUILTIN)

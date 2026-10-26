@@ -14,3 +14,8 @@ markers.svg
 *.jpeg
 .macros.json
 .leaderboard.json
+
+# 测试覆盖率
+.coverage
+htmlcov/
+coverage.json
