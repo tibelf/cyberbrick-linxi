@@ -40,6 +40,7 @@ python -m linx_client run --no-audio --backend mock # 不开声卡，终端输�
 python -m linx_client run --backend udp --web       # Wi-Fi 控车 + 网页控制台 http://localhost:8080
 python -m linx_client run --backend udp --pad       # 再加手机手柄（局域网，地址带随机密钥，控制台上有二维码）
 python -m linx_client pad --backend udp             # 只开手机手柄，不连灵矽
+python -m linx_client run --backend udp --camera 0 --blind --blind-cm-per-s 30  # 一张俯拍图规划、闭眼走完（只用灵矽视觉）
 python -m linx_client wifi-setup [--host IP] [--code-only|--uninstall]  # 给车装/更新/卸载 Wi-Fi 控车程序
 python -m linx_client car-exec --host IP "print(1)" # 无线在车上执行代码（维护密码读 .car_admin_password）
 python -m linx_client tank-test --backend serial    # 逐步测试每个动作（车先架空）

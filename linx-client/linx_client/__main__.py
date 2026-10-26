@@ -252,6 +252,17 @@ async def _run(args):
                                   on_photo=publish, navigator=navigator)
             print("🔳 标记跟踪：车顶 0 号标记，目标 " + (args.marker_targets or "1–9 号标记或颜色")
                   + f"；地图锚点 {args.anchor_id} 号（平放在地上，说“拍一张地图”建图）")
+        if args.blind:
+            from .blind import BlindNavigator
+            from .tools import register_blind_tools
+
+            # 一张俯拍图规划、闭眼走完：只在 self.blind.map 时拍一次照片交给视觉模型
+            blind = BlindNavigator(tank, photo.ask, frame=getattr(photo.camera, "frame", None),
+                                   say=lambda text: session.say(text), cm_per_s=args.blind_cm_per_s,
+                                   facing=args.blind_facing,
+                                   on_map=lambda *a: photo.on_photo and photo.on_photo(*a))
+            register_blind_tools(mcp, blind)
+            print(f"🙈 闭眼导航：直行按 {args.blind_cm_per_s} cm/s 换算，拍照前车头朝{'画面上方' if args.blind_facing == 'up' else '任意方向'}")
         register_camera_tools(mcp, photo, view=args.camera_view, seeker=seeker, wanderer=wanderer)
         print(f"📷 摄像头：{args.camera}（需在智控台开启视觉分析）")
     else:
@@ -456,6 +467,11 @@ def main():
     _add_tank_args(p_pad)
     p_pad.add_argument("--web-port", type=int, default=8080, help="网页端口")
     p_run.add_argument("--camera", help="开启拍照工具：0=电脑摄像头序号（0:1920x1440 = 指定分辨率），http://…=JPEG 快照地址，其他=图片文件")
+    p_run.add_argument("--blind", action="store_true",
+                       help="一张俯拍图规划、闭眼走完（需要 --camera）：说“拍一张俯拍图”记住场地，之后去哪都不再拍照")
+    p_run.add_argument("--blind-cm-per-s", type=float, default=30.0, help="速度 80 直行每秒多少厘米（要实测）")
+    p_run.add_argument("--blind-facing", choices=["up", "auto"], default="up",
+                       help="up=拍照前车头朝画面上方（推荐），auto=让视觉模型按炮管尖判断")
     p_run.add_argument("--camera-view", choices=["overhead", "front"], default="overhead",
                        help="overhead=摄像头固定在场地旁边（俯拍或斜拍，越高越好），front=摄像头装在车上朝前")
 

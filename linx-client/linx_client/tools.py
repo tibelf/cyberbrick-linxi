@@ -221,3 +221,23 @@ def register_camera_tools(mcp: McpServer, photo, view: str = "overhead", seeker=
         [Prop("question", "string", "要从照片里回答的问题")],
         photo,
     )
+
+
+def register_blind_tools(mcp: McpServer, blind) -> None:
+    """blind 是 blind.BlindNavigator：一张俯拍图规划、闭眼走完。"""
+    mcp.add_tool(
+        "self.blind.map",
+        "拍一张从正上方往下拍的场地照片，让视觉模型记住小车和障碍物在哪。之后用 self.blind.goto 去某个东西那里时，"
+        "小车闭着眼按规划好的绕障路线走，不再拍照。用户说“拍一张俯拍图/记住场地/重新拍地图/东西挪了”时调用；"
+        "如果用户已经说了要去哪，把目标填进 target，让视觉模型一定把它标出来。拍照前车头要朝画面上方。",
+        [Prop("target", "string", "接下来要去的东西（例如“红色盒子”），可以不填", default="")],
+        blind.build,
+    )
+    mcp.add_tool(
+        "self.blind.goto",
+        "闭着眼走到地图上的某个东西旁边：按 self.blind.map 记住的场地规划绕开障碍物的路线，转向和前进按校准参数执行，"
+        "途中不拍照。用户说“去红色盒子那里/开到纸箱旁边”时调用（先要有 self.blind.map 记住的地图）。"
+        "位置是估计的，走过几段后会越来越不准，用户觉得偏了就重新 self.blind.map。",
+        [Prop("target", "string", "要去的东西，用地图里的名字")],
+        blind.goto,
+    )
