@@ -33,6 +33,10 @@ EXTRA_MARGIN_CM = 15.0  # 闭眼走误差大，障碍物在“车身半径 + MAR
 MARGIN_STEPS = (EXTRA_MARGIN_CM, 8.0, 0.0)  # 留不出路时逐步收窄，并如实告诉用户
 MIN_TURN_DEG = 4
 STOP_GAP_CM = 8.0  # 到了以后车头离目标边缘多远
+# 去目标的哪一侧（从车看过去）。旁边 = 靠车这一侧；绕一圈 = 左边 → 后面 → 右边 → 回到出发点
+WHERE = ("旁边", "后面", "左边", "右边", "绕一圈")
+AROUND_GAP_CM = 4.0  # 绕到后面/侧面时，终点比膨胀区再往外这么多，保证落在能走的地方
+GOAL_TOLERANCE_CM = 15.0  # 规划出来的终点离想去的点超过这么多，说明那边没地方（出了照片或被挡住）
 VISION_TIMEOUT_S = 45  # 要视觉模型按格式列坦克、车头、炮管尖和每个障碍物，实测约 17s（简单问题约 2.6s）
 CAR_NAMES = ("坦克", "小车", "小坦克", "车")
 
@@ -321,12 +325,16 @@ class BlindNavigator:
         return (f"记住场地了：大约 {m.width_cm / 100:.1f}×{m.height_cm / 100:.1f} 米，障碍物：{names}；{facing}。"
                 "之后去哪都闭着眼按路线走，不再拍照")
 
-    def plan(self, target: str):
+    def plan(self, target: str, where: str = "旁边"):
         """规划去 target 的路线 → (动作序列, 终点估计, 路线点, 目标中心, 用了多少额外余量, 规划用的地图)。"""
         m = self.map
         if m is None:
             raise RuntimeError("还没有记住场地：先说“拍一张俯拍图”")
+        if where not in WHERE:
+            raise ValueError(f"where 只能是 {'/'.join(WHERE)}")
         center, half, name = self._goal(target)
+        if where != "旁边":
+            return self._plan_around(target, where, center, half)
         base = m.floor_map(0, skip=name)
         for extra in MARGIN_STEPS:
             fm = m.floor_map(extra, skip=name) if extra else base
@@ -341,11 +349,44 @@ class BlindNavigator:
         end = route_end(m.pose, path, face=center)
         return steps, end, path, center, extra, fm
 
-    def goto(self, target: str) -> str:
+    def _plan_around(self, target, where, center, half):
+        """绕到目标的后面/左边/右边，或绕一圈回来：目标本身也算障碍物，每段分开规划、分开拉直
+        （整圈一起拉直的话，“起点 → 回到起点”是直线可走的，整圈会被拉成原地不动）。"""
+        m = self.map
+        start = m.pose[:2]
+        d = math.dist(start, center)
+        if d < 1:
+            raise RuntimeError(f"车好像就在{target}上，没法判断前后")
+        ux, uy = (center[0] - start[0]) / d, (center[1] - start[1]) / d  # 车 → 目标
+        base = m.floor_map(0)
+        for extra in MARGIN_STEPS:
+            fm = m.floor_map(extra) if extra else base
+            r = half + CAR_RADIUS_CM + MARGIN_CM + extra + AROUND_GAP_CM
+            spot = {"后面": (center[0] + ux * r, center[1] + uy * r),
+                    "左边": (center[0] - uy * r, center[1] + ux * r),  # 车看过去的左手边
+                    "右边": (center[0] + uy * r, center[1] - ux * r)}
+            goals = [spot["左边"], spot["后面"], spot["右边"], start] if where == "绕一圈" else [spot[where]]
+            path, cur = [], start
+            for g in goals:
+                leg = fm.plan(cur, g)
+                if not leg or math.dist(leg[-1], g) > GOAL_TOLERANCE_CM:
+                    path = None
+                    break
+                path += simplify(cur, leg, base)
+                cur = path[-1]
+            if path:
+                break
+        else:
+            raise RuntimeError(f"去不了{target}{where}：那边没有地方（出了照片范围或被别的东西挡住了）")
+        steps = compile_route(m.pose, path, self.cm_per_s, face=center)
+        end = route_end(m.pose, path, face=center)
+        return steps, end, path, center, extra, fm
+
+    def goto(self, target: str, where: str = "旁边") -> str:
         """self.blind.goto：规划好就开始闭眼走，立即返回计划。"""
         m = self.map
-        steps, end, path, center, extra, fm = self.plan(target)
-        if not any(k == "forward" for k, _ in steps):
+        steps, end, path, center, extra, fm = self.plan(target, where)
+        if where == "旁边" and not any(k == "forward" for k, _ in steps):
             raise RuntimeError(f"按地图看车已经在{target}旁边了，不用走。如果实际还没到，说明地图的比例尺不对："
                                "用 --blind-view-cm 填照片横向拍到的地面宽度，或者重新拍地图")
         self._publish(fm, path, center, target)
@@ -353,8 +394,11 @@ class BlindNavigator:
             abs(v) / 90 * 0.4 for k, v in steps if k == "turn")
         narrow = f"，路比较窄，离障碍物只多留了 {extra:.0f} 厘米" if extra < EXTRA_MARGIN_CM else ""
         drift = f"（已经闭眼走了 {m.legs} 段，位置可能偏了，偏太多就说“重新拍地图”）" if m.legs >= 2 else ""
-        desc = f"闭眼去{target}"
-        self.tank.start_mission(desc, lambda: self._run(steps, end, target))
+        desc = f"闭眼去{target}" + ("" if where == "旁边" else where)
+        place = f"到{target}{where}" if where != "绕一圈" else f"绕{target}一圈回来"
+        self.tank.start_mission(desc, lambda: self._run(steps, end, place))
+        if where == "绕一圈":
+            drift = drift or "（绕一圈拐弯多，回到起点可能偏二三十厘米）"
         return (f"开始{desc}：{len(steps)} 个动作，约 {total_s:.0f} 秒，不再看摄像头{narrow}{drift}")
 
     def _goal(self, target: str):
@@ -366,7 +410,7 @@ class BlindNavigator:
         raise RuntimeError(f"地图上没有“{target}”，记住的东西有：{known}。"
                            f"可以重新调用 self.blind.map，target 填“{target}”，让视觉模型专门找它")
 
-    async def _run(self, steps, end, target):
+    async def _run(self, steps, end, place):
         prev = self.tank.persona
         self.tank.persona = "normal"  # 老爷爷走走停停、醉汉走 S 形都会改变走过的距离，闭眼走时先按正常走
         try:
@@ -379,7 +423,7 @@ class BlindNavigator:
             self.map.pose = end
             self.map.legs += 1
             if self.say:
-                await self.say(f"到{target}旁边了（闭眼走的，位置是估计的）")
+                await self.say(f"{place}了（闭眼走的，位置是估计的）")
         finally:
             self.tank.persona = prev
 

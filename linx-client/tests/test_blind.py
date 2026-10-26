@@ -263,3 +263,74 @@ def test_already_next_to_target_says_so_instead_of_spinning():
     nav.map = BlindMap(640, 360, "坦克=45,20,75,80；车头=左；垃圾桶=17,28,42,64")
     with pytest.raises(RuntimeError, match="比例尺"):
         nav.goto("垃圾桶")
+
+
+# 车在右边 (170,100) 车头朝左，垃圾桶 40×40 在 (80,100)
+BIN = (f"坦克={pct_box(170, 100, CAR_LEN_CM, CAR_WID_CM)}；车头=左；垃圾桶={pct_box(80, 100, 40, 40)}")
+
+
+def _clear_of_bin(start, path, need):
+    pts = [start] + list(path)
+    for a, b in zip(pts, pts[1:]):
+        for i in range(61):
+            px, py = a[0] + (b[0] - a[0]) * i / 60, a[1] + (b[1] - a[1]) * i / 60
+            if math.hypot(max(abs(px - 80) - 20, 0), max(abs(py - 100) - 20, 0)) < need:
+                return False
+    return True
+
+
+def test_go_behind_the_bin():
+    nav = _nav(BIN)
+    start = nav.map.pose[:2]
+    steps, end, path, *_ = nav.plan("垃圾桶", "后面")
+    x, y, h = end
+    assert x < 80 - 20 and abs(y - 100) < 15  # 到了桶的另一边（从车看过去的背后）
+    assert _clear_of_bin(start, path, CAR_RADIUS_CM + MARGIN_CM - 2.5)  # 一路不擦桶
+    assert abs(math.degrees(_wrap_deg(math.atan2(100 - y, 80 - x) - h))) < 1  # 转身对着桶
+    assert sum(k == "turn" for k, _ in steps) <= 4
+
+
+def _wrap_deg(a):
+    return (a + math.pi) % (2 * math.pi) - math.pi
+
+
+def test_left_and_right_are_from_the_cars_view():
+    nav = _nav(BIN)  # 车朝左（西）看桶：它的左手边是南（y 小），右手边是北
+    _, left_end, *_ = nav.plan("垃圾桶", "左边")
+    _, right_end, *_ = nav.plan("垃圾桶", "右边")
+    assert left_end[1] < 100 - 20 < 100 + 20 < right_end[1]
+    assert abs(left_end[0] - 80) < 15 and abs(right_end[0] - 80) < 15
+
+
+def test_loop_goes_all_the_way_round_and_back():
+    nav = _nav(BIN)
+    start = nav.map.pose[:2]
+    steps, end, path, *_ = nav.plan("垃圾桶", "绕一圈")
+    assert math.dist(end[:2], start) < 3  # 回到出发点
+    assert min(p[0] for p in path) < 80 - 20  # 真的绕到了桶后面，没有被拉直成原地不动
+    assert min(p[1] for p in path) < 80 and max(p[1] for p in path) > 120  # 两侧都经过
+    assert _clear_of_bin(start, path, CAR_RADIUS_CM + MARGIN_CM - 2.5)
+    with pytest.raises(ValueError):
+        nav.plan("垃圾桶", "上面")
+
+
+def test_behind_says_where_it_arrived():
+    async def main():
+        be = MockBackend(verbose=False)
+        tank = TankExecutor(be, max_speed=100)
+        await tank.start()
+        said = []
+
+        async def say(text):
+            said.append(text)
+
+        nav = BlindNavigator(tank, None, say=say, cm_per_s=600)
+        nav.map = BlindMap(W, H, BIN)
+        assert "垃圾桶后面" in nav.goto("垃圾桶", "后面")
+        while tank.status()["mission"]:
+            await asyncio.sleep(0.02)
+        await tank.close()
+        assert said == ["到垃圾桶后面了（闭眼走的，位置是估计的）"]
+        assert nav.map.pose[0] < 60
+
+    asyncio.run(main())
