@@ -34,7 +34,9 @@ MARGIN_STEPS = (EXTRA_MARGIN_CM, 8.0, 0.0)  # 留不出路时逐步收窄，并�
 MIN_TURN_DEG = 4
 STOP_GAP_CM = 8.0  # 到了以后车头离目标边缘多远
 # 去目标的哪一侧（从车看过去）。旁边 = 靠车这一侧；绕一圈 = 左边 → 后面 → 右边 → 回到出发点
-WHERE = ("旁边", "后面", "左边", "右边", "绕一圈")
+WHERE = ("旁边", "后面", "左边", "右边", "绕一圈", "撞倒")
+RAM_CM = 10.0  # 撞倒：车头碰到目标后再往前冲这么多
+BACK_CM = 15.0  # 撞完退回来这么多
 AROUND_GAP_CM = 4.0  # 绕到后面/侧面时，终点比膨胀区再往外这么多，保证落在能走的地方
 GOAL_TOLERANCE_CM = 15.0  # 规划出来的终点离想去的点超过这么多，说明那边没地方（出了照片或被挡住）
 VISION_TIMEOUT_S = 45  # 要视觉模型按格式列坦克、车头、炮管尖和每个障碍物，实测约 17s（简单问题约 2.6s）
@@ -333,7 +335,7 @@ class BlindNavigator:
         if where not in WHERE:
             raise ValueError(f"where 只能是 {'/'.join(WHERE)}")
         center, half, name = self._goal(target)
-        if where != "旁边":
+        if where not in ("旁边", "撞倒"):
             return self._plan_around(target, where, center, half)
         base = m.floor_map(0, skip=name)
         for extra in MARGIN_STEPS:
@@ -347,6 +349,11 @@ class BlindNavigator:
         path = stop_short(m.pose[:2], path, center, half + CAR_LEN_CM / 2 + STOP_GAP_CM)
         steps = compile_route(m.pose, path, self.cm_per_s, face=center)
         end = route_end(m.pose, path, face=center)
+        if where == "撞倒":  # 已经正对目标、车头离它 STOP_GAP_CM：冲过去再退回来
+            ram, back = STOP_GAP_CM + RAM_CM, BACK_CM
+            steps += [("forward", ram / self.cm_per_s * 1000), ("backward", back / self.cm_per_s * 1000)]
+            x, y, h = end
+            end = (x + (ram - back) * math.cos(h), y + (ram - back) * math.sin(h), h)
         return steps, end, path, center, extra, fm
 
     def _plan_around(self, target, where, center, half):
@@ -394,8 +401,8 @@ class BlindNavigator:
             abs(v) / 90 * 0.4 for k, v in steps if k == "turn")
         narrow = f"，路比较窄，离障碍物只多留了 {extra:.0f} 厘米" if extra < EXTRA_MARGIN_CM else ""
         drift = f"（已经闭眼走了 {m.legs} 段，位置可能偏了，偏太多就说“重新拍地图”）" if m.legs >= 2 else ""
-        desc = f"闭眼去{target}" + ("" if where == "旁边" else where)
-        place = f"到{target}{where}" if where != "绕一圈" else f"绕{target}一圈回来"
+        desc = f"闭眼撞{target}" if where == "撞倒" else f"闭眼去{target}" + ("" if where == "旁边" else where)
+        place = {"绕一圈": f"绕{target}一圈回来", "撞倒": f"撞过{target}"}.get(where, f"到{target}{where}")
         self.tank.start_mission(desc, lambda: self._run(steps, end, place))
         if where == "绕一圈":
             drift = drift or "（绕一圈拐弯多，回到起点可能偏二三十厘米）"
@@ -418,7 +425,7 @@ class BlindNavigator:
                 if kind == "turn":
                     self.tank.turn("left" if v > 0 else "right", max(round(abs(v)), 1))
                 else:
-                    self.tank.move("forward", int(v), BLIND_SPEED)
+                    self.tank.move(kind, int(v), BLIND_SPEED)  # forward / backward
                 await self.tank.wait_idle()
             self.map.pose = end
             self.map.legs += 1

@@ -334,3 +334,30 @@ def test_behind_says_where_it_arrived():
         assert nav.map.pose[0] < 60
 
     asyncio.run(main())
+
+
+def test_ram_drives_into_target_then_backs_off():
+    nav = _nav(BIN, cm_per_s=26)
+    steps, end, *_ = nav.plan("垃圾桶", "撞倒")
+    approach, ram, back = steps[0], steps[-2], steps[-1]
+    assert approach[0] == "forward" and ram[0] == "forward" and back[0] == "backward"
+    # 车中心离桶中心：靠近后 20+9+8=37cm，冲 18cm（车头压进桶 10cm），退 15cm
+    assert ram[1] == pytest.approx(18 / 26 * 1000) and back[1] == pytest.approx(15 / 26 * 1000)
+    assert end[0] == pytest.approx(80 + 20 + CAR_LEN_CM / 2 + 8 - 3, abs=1.5)
+
+
+def test_ram_runs_backward_step():
+    async def main():
+        be = MockBackend(verbose=False)
+        tank = TankExecutor(be, max_speed=100)
+        await tank.start()
+        nav = BlindNavigator(tank, None, cm_per_s=600)
+        nav.map = BlindMap(W, H, BIN)
+        assert "闭眼撞垃圾桶" in nav.goto("垃圾桶", "撞倒")
+        while tank.status()["mission"]:
+            await asyncio.sleep(0.02)
+        await tank.close()
+        drives = [c[1:3] for c in be.calls if c[0] == "drive"]
+        assert drives[-1] == (-BLIND_SPEED, -BLIND_SPEED)  # 最后一步是倒车
+
+    asyncio.run(main())

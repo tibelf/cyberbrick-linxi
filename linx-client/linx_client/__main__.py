@@ -264,7 +264,10 @@ async def _run(args):
             register_blind_tools(mcp, blind)
             print(f"🙈 闭眼导航：直行按 {args.blind_cm_per_s} cm/s 换算，车头朝向"
                   + ("约定朝画面上方" if args.blind_facing == "up" else "按炮管尖判断"))
-        register_camera_tools(mcp, photo, view=args.camera_view, seeker=seeker, wanderer=wanderer)
+        # 闭眼模式：用户要的是“只拍一张、后面不拍”，去哪/撞倒都走 self.blind.goto，
+        # 不注册边看边找的 seek，免得大模型选它（它会一直拍照）
+        register_camera_tools(mcp, photo, view=args.camera_view, seeker=None if args.blind else seeker,
+                              wanderer=wanderer)
         print(f"📷 摄像头：{args.camera}（需在智控台开启视觉分析）")
     else:
         from .tools import register_wander_tool
