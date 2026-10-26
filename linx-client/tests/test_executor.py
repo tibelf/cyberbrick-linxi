@@ -224,3 +224,23 @@ def test_mood_skips_wiggle_when_command_follows(monkeypatch):
         assert any(c[0] == "drive" and c[1] == -c[2] for c in be.calls)
 
     run(main())
+
+
+def test_big_turns_split_into_chunks_up_to_90():
+    """实测满速 0.4s=90°、0.6s≈180°：超过 90° 要拆成几段从静止起步，不能一口气转。"""
+    async def main():
+        be = MockBackend(verbose=False)
+        tank = TankExecutor(be, max_speed=100)
+        await tank.start()
+        tank.turn("left", 124)
+        tank.turn("right", 90)
+        tank.turn("left", 360)
+        await drain(tank)
+        await tank.close()
+        drives = [c for c in be.calls if c[0] == "drive"]
+        assert [c[3] - 300 for c in drives[:2]] == [275, 275]  # 124° = 62° + 62°，各 275ms
+        assert drives[2][1:3] == (100, -100) and drives[2][3] - 300 == 400  # 90° 一次转完
+        assert [c[3] - 300 for c in drives[3:]] == [400] * 4  # 一圈 = 4 × 90°
+        assert be.calls[be.calls.index(drives[0]) + 1] == ("halt",)  # 段与段之间先停
+
+    run(main())
