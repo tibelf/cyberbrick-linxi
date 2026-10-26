@@ -9,9 +9,10 @@
 
 精度：没有编码器/陀螺仪，履带打滑，1–2 米、拐一两个弯的路线终点大约偏十几厘米。所以障碍物额外多留 EXTRA_MARGIN_CM，
 转向一律满速原地转（唯一校准过的转法），直行时长按 cm_per_s（`--blind-cm-per-s`，要实测）换算。
-车头朝向：默认（facing="auto"）用视觉模型给的“车身中心 → 炮管尖”，并在回复里用一句话说出来（“车头朝画面左边”），
-看错了用户一听就知道；视觉模型没给炮管尖时按车头朝画面上方算。facing="up" 强制约定车头朝上（实测用户经常没摆正，
-车头其实对着目标却被当成朝上，结果先左转 90° 跑偏，所以不再默认）。
+车头朝向按可靠程度依次取：①用户说的（“车头对着垃圾桶”“车头朝左”，工具参数 facing）；②视觉模型从 8 个画面方向里
+选一个（“车头=左”）；③“车身中心 → 炮管尖”的坐标；④都没有就按朝画面上方。最后在回复里说出来，看错了用户一听就知道。
+实测：车在画面里只有五十多像素宽，炮管尖离中心二十来像素，视觉模型坐标差 3% 方向就偏 30° 以上（真对着左边，算成左上方），
+所以坐标只当兜底。facing="up" 强制约定车头朝上（用户经常没摆正，不再默认）。
 要去的目标本身不算障碍物：额外余量是防撞“别的”东西的，对目标要一直开到跟前（车头离它边缘 STOP_GAP_CM）。
 """
 
@@ -38,10 +39,24 @@ CAR_NAMES = ("坦克", "小车", "小坦克", "车")
 def question(target: str | None = None) -> str:
     want = f"其中“{target}”一定要列出来，名字就写“{target}”。" if target else ""
     return ("这是从正上方往下俯拍的地面照片，里面有一辆履带小坦克。用百分比坐标（左上角 0,0，右下角 100,100）回答，"
-            "只输出一行，不要解释：坦克=左,上,右,下；炮管尖=x,y；然后列出地面上会挡住小坦克的东西"
+            "只输出一行，不要解释：坦克=左,上,右,下；车头=上/下/左/右/左上/右上/左下/右下 之一（炮管指向画面哪边）；"
+            "炮管尖=x,y；然后列出地面上会挡住小坦克的东西"
             "（箱子、椅子腿、桌腿、瓶子、墙、家具等；地垫、地毯、地板花纹、纸片、影子不算），"
             f"每个写成 名字=左,上,右,下。{want}"
-            "例如：坦克=40,60,52,75；炮管尖=46,55；纸箱=10,20,30,40；红色瓶子=70,30,75,40")
+            "例如：坦克=40,60,52,75；车头=上；炮管尖=46,55；纸箱=10,20,30,40；红色瓶子=70,30,75,40")
+
+
+# 画面方向 → 角度（x 向右、y 向上，逆时针为正）
+DIRECTIONS = {"右上": 45, "左上": 135, "左下": -135, "右下": -45, "右": 0, "上": 90, "左": 180, "下": -90}
+_DIR = re.compile(r"车头(?:朝向)?\s*[=:：]\s*(左上|右上|左下|右下|上|下|左|右)")
+
+
+def direction_deg(text: str) -> float | None:
+    """“左”“朝右上”“车头朝画面左边” → 角度；说不出方向返回 None。先认两个字的（左上），再认一个字的。"""
+    for word, deg in DIRECTIONS.items():
+        if word in text:
+            return deg
+    return None
 
 
 _NUM = r"(\d+(?:\.\d+)?)"
@@ -72,7 +87,7 @@ def parse_answer(answer: str):
 class BlindMap:
     """视觉模型的回答 → 以厘米为单位的地图（x 向右、y 向上，原点在照片左下角）+ 车的位置估计。"""
 
-    def __init__(self, w_px: int, h_px: int, answer: str, facing: str = "auto", image=None):
+    def __init__(self, w_px: int, h_px: int, answer: str, facing: str = "auto", image=None, user_facing: str = ""):
         car, tip, others = parse_answer(answer)
         if car is None:
             raise ValueError(f"视觉模型没找到坦克（回答：{answer[:80]}）")
@@ -80,14 +95,26 @@ class BlindMap:
         px = lambda p, total: p / 100 * total  # noqa: E731
         cx = px((car[0] + car[2]) / 2, w_px)
         cy = px((car[1] + car[3]) / 2, h_px)
-        # 车头朝向（图像坐标：u 向右、v 向下）
-        self.heading_from_tip = False
-        if facing == "auto" and tip is not None and math.hypot(px(tip[0], w_px) - cx, px(tip[1], h_px) - cy) > 1:
+        # 车头朝向（图像坐标：u 向右、v 向下；heading 用 y 向上的角度）
+        self.heading_source = "default"
+        heading_img = math.pi / 2  # 都没有时按朝画面上方
+        vision_dir = _DIR.search(answer)
+        toward = next(((n, b) for n, b in others if n and n in user_facing), None) if user_facing else None
+        if toward:  # 用户说“车头对着垃圾桶”
+            n, (x1, y1, x2, y2) = toward
+            heading_img = math.atan2(-(px((y1 + y2) / 2, h_px) - cy), px((x1 + x2) / 2, w_px) - cx)
+            self.heading_source = "user"
+        elif user_facing and direction_deg(user_facing) is not None:  # 用户说“车头朝左”
+            heading_img = math.radians(direction_deg(user_facing))
+            self.heading_source = "user"
+        elif facing == "auto" and vision_dir:
+            heading_img = math.radians(DIRECTIONS[vision_dir.group(1)])
+            self.heading_source = "vision"
+        elif facing == "auto" and tip is not None and math.hypot(px(tip[0], w_px) - cx, px(tip[1], h_px) - cy) > 1:
             du, dv = px(tip[0], w_px) - cx, px(tip[1], h_px) - cy
             heading_img = math.atan2(-dv, du)
-            self.heading_from_tip = True
-        else:
-            heading_img = math.pi / 2  # 约定车头朝画面上方
+            self.heading_source = "tip"
+        self.heading_from_tip = self.heading_source == "tip"
         self.tip_disagrees = False
         if facing == "up" and tip is not None:
             du, dv = px(tip[0], w_px) - cx, px(tip[1], h_px) - cy
@@ -250,24 +277,26 @@ class BlindNavigator:
         self.on_map = on_map  # (jpeg, 标题, 说明)：网页控制台显示规划的路线
         self.map: BlindMap | None = None
 
-    async def build(self, target: str = "") -> str:
-        """self.blind.map：拍一张，记住场地。target：用户接下来要去的东西，让视觉模型一定标出来。"""
+    async def build(self, target: str = "", facing: str = "") -> str:
+        """self.blind.map：拍一张，记住场地。target：用户接下来要去的东西，让视觉模型一定标出来；
+        facing：用户说的车头朝向（“对着垃圾桶”“朝左”），比视觉模型判断的可靠。"""
         img = await asyncio.to_thread(self.frame) if self.frame else None
         h, w = (img.shape[:2] if img is not None else (960, 1280))
         q = question(target or None)
         answer = await (self.ask(q, frame=img) if img is not None else self.ask(q))
         try:
-            self.map = BlindMap(w, h, answer, self.facing, image=img)
+            self.map = BlindMap(w, h, answer, self.facing, image=img, user_facing=facing)
         except ValueError as e:
             return f"没看清场地：{e}。请让整个坦克都在画面里，摄像头尽量正对地面往下拍"
         m = self.map
         names = "、".join(n for n, _ in m.obstacles) or "没有障碍物"
-        if m.heading_from_tip:
-            facing = f"我看车头朝{m.heading_words()}（看错了就说“重新拍地图”）"
-        else:
-            facing = "看不清炮管，按车头朝画面上方算" if self.facing == "auto" else "按约定车头朝画面上方"
-            if m.tip_disagrees:
-                facing += "，但炮管看起来不是朝上，请把车头摆正朝上再拍一次"
+        how = {"user": "按你说的", "vision": "视觉模型看", "tip": "按炮管尖估计",
+               "default": "看不清车头，先按"}[m.heading_source]
+        facing = f"{how}车头朝{m.heading_words()}"
+        if m.heading_source != "user":
+            facing += "（不对的话告诉我车头朝哪，例如“车头对着垃圾桶”）"
+        if m.tip_disagrees:
+            facing += "，但炮管看起来不是朝上，请把车头摆正朝上再拍一次"
         return (f"记住场地了：大约 {m.width_cm / 100:.1f}×{m.height_cm / 100:.1f} 米，障碍物：{names}；{facing}。"
                 "之后去哪都闭着眼按路线走，不再拍照")
 

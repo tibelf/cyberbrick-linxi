@@ -196,3 +196,46 @@ def test_car_already_facing_target_goes_straight_and_close():
     gap = 170 - 80 - 20 - CAR_LEN_CM / 2 - 8  # 车中心到“桶边缘前 8cm 处”还要走的距离
     assert steps[0][1] == pytest.approx(gap / 30 * 1000, rel=0.05)
     assert end[0] == pytest.approx(80 + 20 + CAR_LEN_CM / 2 + 8, abs=1.5)
+
+
+# 用户原图：640×360，坦克在右边、车头正对左边的垃圾桶；视觉模型把车头说成“左上”
+REAL = "坦克=75,38,84,56；车头=左上；炮管尖=76,44；垃圾桶=17,28,42,64"
+
+
+def test_direction_words():
+    from linx_client.blind import direction_deg
+
+    assert direction_deg("左") == 180 and direction_deg("朝右上方") == 45 and direction_deg("车头朝画面下边") == -90
+    assert direction_deg("对着垃圾桶") is None
+
+
+def test_heading_priority_user_then_vision_then_tip():
+    m = BlindMap(640, 360, REAL)
+    assert m.heading_source == "vision" and m.heading_words() == "画面左上方"  # 视觉模型选的方向优先于炮管尖坐标
+    m = BlindMap(640, 360, REAL, user_facing="车头对着垃圾桶")
+    assert m.heading_source == "user" and m.heading_words() == "画面左边"
+    m = BlindMap(640, 360, REAL, user_facing="朝左")
+    assert m.heading_source == "user" and m.pose[2] == pytest.approx(math.pi)
+    m = BlindMap(640, 360, REAL.replace("车头=左上；", ""))
+    assert m.heading_source == "tip"
+
+
+def test_user_says_facing_bin_then_goes_straight():
+    nav = BlindNavigator(None, None, cm_per_s=26)
+    nav.map = BlindMap(640, 360, REAL, user_facing="车头对着垃圾桶")
+    steps, *_ = nav.plan("垃圾桶")
+    assert steps[0][0] == "forward" or abs(steps[0][1]) < 10  # 不会先大角度转开
+
+
+def test_build_reports_heading_and_uses_facing():
+    async def main():
+        tank = TankExecutor(MockBackend(verbose=False))
+        await tank.start()
+        nav = BlindNavigator(tank, FakePhoto(REAL).ask)
+        text = await nav.build("垃圾桶")
+        assert "视觉模型看车头朝画面左上方" in text and "告诉我车头朝哪" in text
+        text = await nav.build("垃圾桶", facing="车头对着垃圾桶")
+        assert "按你说的车头朝画面左边" in text
+        await tank.close()
+
+    asyncio.run(main())
