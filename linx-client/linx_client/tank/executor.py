@@ -46,8 +46,10 @@ class TankExecutor:
         fire_pulse_ms: int = 500,
         fire_cooldown_s: float = 1.5,
         max_shots: int = 3,
+        ms_per_90: int = MS_PER_90_AT_FULL,
     ):
         self.backend = backend
+        self.ms_per_90 = ms_per_90  # 满速原地转 90° 要多少毫秒：地面不同（地板/地毯）差别很大，要现场校准
         self.max_speed = max_speed
         self.fire_enabled = fire_enabled
         self.fire_pulse_ms = fire_pulse_ms
@@ -290,7 +292,7 @@ class TankExecutor:
         s = self._speed(speed)
         # 只在满速下校准过：低速时履带打滑严重，80% 速度实测转速不到一半，所以语音转向固定满速。
         # 只有 --max-speed 限速时才会低于满速，那时按比例换算只是近似
-        ms = min(int(int(angle) / 90 * MS_PER_90_AT_FULL * 100 / max(s, 1)), MAX_ACTION_MS)
+        ms = min(int(int(angle) / 90 * self.ms_per_90 * 100 / max(s, 1)), MAX_ACTION_MS)
         # 原地转向：两条履带反向，比单侧履带转快一倍、几乎不画弧
         left, right = (-s, s) if direction == "left" else (s, -s)
         name = "左转" if direction == "left" else "右转"

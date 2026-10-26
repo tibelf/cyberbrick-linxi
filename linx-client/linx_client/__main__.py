@@ -22,10 +22,13 @@ def _add_tank_args(p: argparse.ArgumentParser):
     p.add_argument("--host", help="Wi-Fi 模式下车的 IP，不填则局域网广播自动查找")
     p.add_argument("--max-speed", type=int, default=100, help="速度上限 0-100（车架空首测时可设 40）")
     p.add_argument("--no-fire", action="store_true", help="锁定发射功能")
+    p.add_argument("--turn-ms-per-90", type=int, default=400,
+                   help="满速原地转 90° 要多少毫秒（换了地面要重新校准：转多了就调小，转少了就调大）")
 
 
 def _make_tank(args) -> TankExecutor:
-    return TankExecutor(make_backend(args.backend, args.port, args.host), max_speed=args.max_speed, fire_enabled=not args.no_fire)
+    return TankExecutor(make_backend(args.backend, args.port, args.host), max_speed=args.max_speed,
+                        fire_enabled=not args.no_fire, ms_per_90=args.turn_ms_per_90)
 
 
 def _ask_wifi_config(default_ssid: str) -> dict:

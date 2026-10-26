@@ -398,7 +398,7 @@ class BlindNavigator:
                                "用 --blind-view-cm 填照片横向拍到的地面宽度，或者重新拍地图")
         self._publish(fm, path, center, target)
         total_s = sum(v for k, v in steps if k == "forward") / 1000 + sum(
-            abs(v) / 90 * 0.4 for k, v in steps if k == "turn")
+            abs(v) / 90 * self.tank.ms_per_90 / 1000 for k, v in steps if k == "turn")
         narrow = f"，路比较窄，离障碍物只多留了 {extra:.0f} 厘米" if extra < EXTRA_MARGIN_CM else ""
         drift = f"（已经闭眼走了 {m.legs} 段，位置可能偏了，偏太多就说“重新拍地图”）" if m.legs >= 2 else ""
         desc = f"闭眼撞{target}" if where == "撞倒" else f"闭眼去{target}" + ("" if where == "旁边" else where)
