@@ -27,7 +27,7 @@ from .tank.executor import MAX_ACTION_MS
 CAR_LEN_CM = 18.0  # Mini T 车身（含履带）长 × 宽，换算比例尺用
 CAR_WID_CM = 14.0
 BLIND_SPEED = 80
-DEFAULT_CM_PER_S = 30.0  # 速度 80 直行每秒多少厘米：猜的，要实测后用 --blind-cm-per-s 改
+DEFAULT_CM_PER_S = 26.0  # 速度 80 直行每秒多少厘米（2026-10-26 用户在公司地毯上实测约 26；地面、电量不同会变）
 EXTRA_MARGIN_CM = 15.0  # 闭眼走误差大，障碍物在“车身半径 + MARGIN_CM”之外再多留这么多
 MARGIN_STEPS = (EXTRA_MARGIN_CM, 8.0, 0.0)  # 留不出路时逐步收窄，并如实告诉用户
 MIN_TURN_DEG = 4
