@@ -171,6 +171,27 @@ def _admin_session(conn, password):
         conn.write(body)
 
 
+ERR_LOG = '/wifi_err.log'
+
+
+def _log_error(where, e):
+    """出错原因写进车上的文件（最多留 4KB），装车后通过维护通道 car-exec 读：print(open('/wifi_err.log').read())"""
+    try:
+        s = io.StringIO()
+        sys.print_exception(e, s)
+        line = '[%d s] %s: %s' % (time.ticks_ms() // 1000, where, s.getvalue())
+        print('[wifi]', line)
+        try:
+            with open(ERR_LOG) as f:
+                old = f.read()[-3000:]
+        except OSError:
+            old = ''
+        with open(ERR_LOG, 'w') as f:
+            f.write(old + line)
+    except Exception:
+        pass
+
+
 def main():
     halt()
     _led(20, 10, 0)  # 黄：正在连 Wi-Fi
@@ -192,10 +213,24 @@ def main():
     poller = select.poll()
     poller.register(sock, select.POLLIN)
     poller.register(srv, select.POLLIN)
+    try:
+        _serve(sock, srv, poller, cfg)
+    except Exception as e:  # 连上 Wi-Fi 以后再出错：停车、记下原因、重启，不退回原厂遥控（那样网络指令就没人收了）
+        halt()
+        _log_error('主循环', e)
+        import machine
+        machine.reset()
+
+
+def _serve(sock, srv, poller, cfg):
     while True:
         for obj, *_ in poller.poll():
             if obj is srv:
-                conn, _ = srv.accept()
+                try:
+                    conn, _ = srv.accept()
+                except OSError as e:
+                    _log_error('accept', e)
+                    continue
                 try:
                     _admin_session(conn, cfg['admin_password'])
                 except Exception as e:  # 维护会话出错不影响控车
@@ -203,10 +238,17 @@ def main():
                 finally:
                     conn.close()
                 continue
-            data, addr = sock.recvfrom(128)
+            try:
+                data, addr = sock.recvfrom(128)
+            except OSError as e:  # 网络抖一下不能让主循环退出
+                _log_error('recvfrom', e)
+                continue
             try:
                 reply = handle(data.decode())
             except Exception as e:  # 指令出错也不能让主循环退出
                 halt()
                 reply = 'err ' + str(e)
-            sock.sendto(reply.encode(), addr)
+            try:
+                sock.sendto(reply.encode(), addr)
+            except OSError as e:  # 回不了也没关系：主机等不到应答会重发
+                _log_error('sendto', e)
