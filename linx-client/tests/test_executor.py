@@ -194,3 +194,33 @@ def test_manual_takes_over_and_blocks_emotes():
         await tank.close()
 
     run(main())
+
+
+def test_mood_skips_wiggle_when_command_follows(monkeypatch):
+    """平台先发情绪、紧接着发“前进”：不能先原地扭一下再走。"""
+    from linx_client.tank import mood as mood_mod
+
+    monkeypatch.setattr(mood_mod, "EMOTE_DELAY_S", 0.1)
+
+    async def main():
+        be = MockBackend(verbose=False)
+        tank = TankExecutor(be, max_speed=100)
+        await tank.start()
+        m = mood_mod.Mood(tank)
+        assert m.on_emotion("happy") == "happy"
+        tank.move("forward", 200, 80)  # 指令紧跟着到
+        await asyncio.sleep(0.3)
+        await drain(tank)
+        drives = [c[1:3] for c in be.calls if c[0] == "drive"]
+        assert drives == [(80, 80)]  # 只有直行，没有原地扭
+        assert ("led", 0, 40, 0) in be.calls  # 车灯照样变色
+
+        m2 = mood_mod.Mood(tank)  # 没有指令跟着：照常扭一扭
+        be.calls.clear()
+        m2.on_emotion("happy")
+        await asyncio.sleep(0.2)
+        await drain(tank)
+        await tank.close()
+        assert any(c[0] == "drive" and c[1] == -c[2] for c in be.calls)
+
+    run(main())

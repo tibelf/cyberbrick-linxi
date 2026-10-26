@@ -27,6 +27,8 @@ COLORS = {  # 亮度压低，NeoPixel 全亮很刺眼
     "thinking": (25, 0, 40),
     "neutral": (0, 0, 20),  # 与就绪时的蓝灯一致
 }
+# 平台先发情绪、再发工具调用：等一会儿再做小动作，这期间来了指令就不做了（否则“前进”前会先原地扭一下）
+EMOTE_DELAY_S = 1.5
 COOLDOWN_S = 4.0
 REPEAT_S = 20.0
 _now = time.monotonic  # 单独引用，测试时只替换这里，不影响事件循环的时钟
@@ -51,5 +53,10 @@ class Mood:
         self._last_group, self._last_t = group, now
         asyncio.create_task(self.tank.led(*COLORS[group]))
         if group != "neutral":
-            self.tank.emote(group)
+            asyncio.create_task(self._emote_later(group, self.tank.command_seq))
         return group
+
+    async def _emote_later(self, group: str, seq: int):
+        await asyncio.sleep(EMOTE_DELAY_S)
+        if self.tank.command_seq == seq:  # 这期间没有新指令，才做小动作
+            self.tank.emote(group)

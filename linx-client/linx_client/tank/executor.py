@@ -59,6 +59,7 @@ class TankExecutor:
         self._current: asyncio.Task | None = None
         self._current_desc: str | None = None
         self._manual_t = -1e9  # 最近一次手柄指令的时间
+        self.command_seq = 0  # 每来一个动作/任务/手柄指令就加 1：情绪小动作据此判断“指令是不是马上就来了”
         self._mission: asyncio.Task | None = None  # 闭环任务（如看图寻的），同一时间只有一个
         self._mission_desc: str | None = None
         self._worker: asyncio.Task | None = None
@@ -152,6 +153,7 @@ class TankExecutor:
         if queued + action.duration_ms > MAX_QUEUE_MS:
             raise ValueError("动作排太多了，先等当前动作做完或说“停”")
         self._queue.append(action)
+        self.command_seq += 1
         self._wakeup.set()
         return f"已安排：{action.desc}"
 
@@ -166,6 +168,7 @@ class TankExecutor:
             if self._current and not self._current.done():
                 self._current.cancel()  # 被取消的动作会在 finally 里 halt
         self._mission_desc = desc
+        self.command_seq += 1
         self._mission = asyncio.create_task(self._guard_mission(desc, run))
         return f"开始：{desc}" + (f"（已停止之前的「{replaced}」）" if replaced else "")
 
@@ -202,6 +205,7 @@ class TankExecutor:
                     break
                 await asyncio.sleep(0.01)
         self._manual_t = time.monotonic()
+        self.command_seq += 1
         clip = lambda v: max(-self.max_speed, min(int(v), self.max_speed))  # noqa: E731
         left, right, barrel = clip(left), clip(right), max(-1, min(int(barrel), 1))
         if not (left or right or barrel):
