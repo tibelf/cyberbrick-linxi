@@ -2,7 +2,7 @@
 
 > 每个 agent 收工前更新本文件并提交。按时间倒序记录，最新的写在最上面。规则见 `AGENTS.md`「交接协议」。
 
-**最后更新**：2026-10-25 · Claude Code（自由闲逛）；之前：2026-10-24 · Claude Code（车 USB 接通，BOOTSTRAP 按真实接线重写）
+**最后更新**：2026-10-27 · Codex（代码质量自动评估调研）；历史功能记录见下文
 
 ## 当前状态
 
@@ -11,6 +11,8 @@
 - 还没有接实车；**灵矽 mock 联调已打通**：文本「往前走两秒然后开一炮」→ 平台依次调用 move(forward, 2000) 和 fire(1)，并有语音回复
 
 ## 进行中
+
+- **（2026-10-27）代码质量自动评估调研完成**：现有 `.github/workflows/tests.yml` 在 main 推送、PR、手动触发时，用 Python 3.13 跑 pytest 和行覆盖率并更新徽章；没有覆盖率下限、分支覆盖率或静态分析配置。本次仅检查并更新交接记录，未修改业务代码、测试或 CI。检查基于 `a03db80` 加开工时已有的 5 个未提交文件（`__main__.py`、`blind.py`、`tools.py`、`prompts/agent-prompt.md`、`tests/test_blind.py`），这些改动均保留。实测和下一步见下方。
 
 - **（2026-10-26）补测试，覆盖率 76% → 90%**（分支 `claude/test-coverage`）：新增 `test_ota_identity`、`test_netadmin`、`test_serial_backend`、`test_cli`（run 在各参数组合下注册哪些工具、activate、car-exec、wifi-setup、tank-test）、`test_session_events`（事件转发、重连、麦克风上传规则）、`test_camera_more`（假 VideoCapture）、`test_audio`（假 sounddevice），`test_macros` 补全军出击（前进 5000 速度 100 × 8）等。只加测试不改业务代码；`requirements-dev.txt` 加 `pytest-cov`，`.coverage` 已 gitignore。跑覆盖率：`python -m pytest --cov=linx_client`。✅ 223 passed。仍偏低：`__main__.py` 71%（marker-test/map-test 实时循环、pad 常驻、交互输入 Wi-Fi 配置、USB 打开车）、`marker_seek.py` 78%
 
@@ -65,6 +67,8 @@
 
 ## 下一步（按优先级）
 
+- **代码质量检查建议（2026-10-27，尚未实施）**：先确认无摄像头闭眼导航的预期行为，再同步 `tests/test_cli.py::test_run_blind_without_camera_warns`；现有代码已注册 `self.blind.goto`，测试仍要求警告且不注册。随后在现有 CI 增加 Ruff、分支覆盖率报告和按未取整基线设置的门槛，再逐步加入核心模块类型检查、依赖漏洞和凭据扫描。报告应分别列出行覆盖率、分支覆盖率与复杂度，不把覆盖率当作质量评分；若要阻止不合格 PR 合并，还需在 GitHub 配置必需状态检查（本次未查询远端规则）。
+
 -11. **（2026-10-25 最新）情绪肢体语言 + 人格切换**：`tank/mood.py` 把平台 `llm` 消息里的 emotion 映射成 5 种小动作和车灯颜色。车正忙时跳过；两次反应至少间隔 4 秒，同一种情绪 20 秒内不重复；所有动作都成对抵消，车和炮管会回到原位。工具新增 `self.tank.set_persona`（正常/特种兵/老爷爷/醉汉），只改变前进/后退的风格。车灯走新指令 `led r g b`，**车端程序要重新部署才会生效**（顺带还有关闭 Wi-Fi 省电的改动）。提示词 `prompts/agent-prompt.md` 已更新（要求回复以表情开头、人格说话风格、按角度转向），**要用户手动贴到智控台**。`--no-mood` 可关闭。**未在实车/真实平台验证**：测试时用户自己的 run 进程占着同一个 Device-Id，两边互相踢下线
 -10. **（2026-10-25）语音打断**：新增 `LinxSession.abort()`，发送 `{"type":"abort","reason":"wake_word_detected"}`（沿用小智协议），本地清空扬声器，并丢弃本轮回复残余的音频。触发方式：网页上按住说话或点「小车说话中」、急停、终端输入 `a`；加 `--duplex`（需戴耳机）时，按麦克风音量自动判断插话（`--barge-in-level`，默认 2000）。**真实平台实测**：发出 abort 约 0.1s 后平台回 `tts stop`，后面的句子不再下发，说明平台支持打断。注意：同一个 Device-Id 只能有一个连接，两个程序同时连会互相踢下线，测试时要先关掉另一个
 -9. **（2026-10-24）炮管俯仰**：SERVO1 其实控制炮管上下俯仰，不是水平旋转。工具已改为 `self.tank.barrel(up/down)`，**`BARREL_UP_SPEED = 45` 的方向用户已实车确认**。左右瞄准靠转动车身
@@ -82,6 +86,15 @@
 3. **M1 收尾**：真实麦克风说话测试，确认外放回声不会触发误识别（必要时戴耳机）
 
 ## 已验证 / 未验证
+
+2026-10-27 代码质量基线（当前工作区，macOS / Python 3.13.11）：
+
+- `.venv/bin/python -m pytest -q --cov=linx_client --cov-branch` 全套运行：**223 passed / 1 failed，141.56 秒**。唯一失败是 `test_cli.py:98` 对无摄像头闭眼导航旧行为的断言；未修复或复跑。行覆盖率 **89.96%**（3736/4153），分支覆盖率 **78.10%**（1020/1306），两者合计 **87.12%**。徽章显示 90% 是行覆盖率四舍五入，不代表达到精确的 90% 门槛。
+- `uvx ruff check linx_client tests --select E4,E7,E9,F,B --no-cache`（Ruff 0.17.3）：**12 项提示**，业务代码 8 项、测试 4 项；包括 7 项 `zip` 未声明 `strict`，以及未使用变量/导入等。仅扫描，未自动修复；提示不等于确认的运行缺陷。
+- Radon 圈复杂度：`MarkerSeeker._loop` **55**、`build_map` **32**，适合作为优先审查/拆分信号，不直接据此判定功能错误。覆盖率和静态检查的原始报告在本机临时目录 `/tmp/cyberbrick-quality.x7UmE7/`，不提交仓库；现有 `.coverage` 文件未覆盖。
+- 本次未运行真实平台或硬件，未验证 Python 3.11、网页浏览器行为、依赖漏洞、凭据泄漏或类型检查；覆盖率统计范围仅为 `linx_client`，不含网页 JavaScript 和车端固件（车端指令解析已有桩模块测试）。
+
+下表保留早期硬件/平台验证记录，测试数量以本节最新记录为准：
 
 | 项 | 状态 |
 |---|---|
@@ -142,6 +155,8 @@
 - 比赛日期和演示形式
 
 ## 决策记录
+
+- **2026-10-27**：本次请求是评估自动化方法，先复用现有 pytest/CI 获取可复现基线，补跑 Ruff 和复杂度报告，不直接调整业务行为或上线新门禁。建议渐进接入：测试与静态错误优先成为合并条件，覆盖率按精确基线防倒退，复杂度先报告；核心急停、限速、发射锁定、断线和任务取消行为应保留独立测试。MicroPython 固件、主机 Python 和网页脚本需按各自运行环境检查，真实看门狗、电机响应和视觉效果仍需实车验证。
 
 - **2026-10-24**：装车后没有 USB，需要无线维护。原计划用 WebREPL，但固件里没有这个模块，于是在 `wifi_main.py` 里加了 TCP 8266 维护通道。会执行网络发来的代码，所以必须先过维护密码，而且会话期间车会先停下。主机端 `NetRepl` 和 `RawRepl` 接口一致，`put_file` 等函数通用。主循环改为 `select.poll` 同时监听 UDP 和 TCP；已在实车验证，`poll` 阻塞期间 Timer 回调照常触发（301ms）
 
