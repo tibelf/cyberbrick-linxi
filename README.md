@@ -14,7 +14,7 @@
 
 ## 演示视频
 
-[![演示视频：点击播放](docs/images/demo-cover.jpg)](docs/demo/demo.mp4)
+[![演示视频：点击播放](docs/images/demo-cover.jpg)](http://tc4lcynug.hn-bkt.clouddn.com/demo.mp4)
 
 点击上图播放（约 2 分钟，[`docs/demo/demo.mp4`](docs/demo/demo.mp4)）：产品介绍、两种行驶风格，以及在办公室地毯上的实车语音控制演示。
 
