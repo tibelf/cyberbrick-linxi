@@ -18,12 +18,7 @@
 
 点击上图播放（约 2 分钟，[`docs/demo/demo.mp4`](docs/demo/demo.mp4)）：产品介绍、两种行驶风格，以及在办公室地毯上的实车语音控制演示。
 
-观看视频下载视频到本地或者访问百度网盘地址
-```
-通过网盘分享的文件：demo.mp4
-链接: https://pan.baidu.com/s/1k9dztL7EulGWFYpBwRR4GQ?pwd=t991 提取码: t991 
---来自百度网盘超级会员v4的分享
-```
+观看视频下载视频到本地或者访问[百度网盘](https://pan.baidu.com/s/1k9dztL7EulGWFYpBwRR4GQ?pwd=t991)
 
 
 ## 主打功能
