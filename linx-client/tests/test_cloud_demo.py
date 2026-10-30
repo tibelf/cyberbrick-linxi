@@ -83,3 +83,30 @@ def test_demo_rejects_weak_or_missing_password():
     for token in ("", "short"):
         with pytest.raises(ValueError):
             CloudDemo(tank, token)
+
+
+def test_proxy_origin_requires_https_and_is_explicit():
+    async def run():
+        port = _free_port()
+        token = "a" * 40
+        tank = TankExecutor(MockBackend(verbose=False))
+        demo = CloudDemo(tank, token)
+        await tank.start()
+        try:
+            for invalid in ("http://car.example", "https://car.example/path", "https://user@car.example"):
+                with pytest.raises(ValueError):
+                    await demo.start(port, invalid)
+            await demo.start(port, "https://car.example")
+            url = f"ws://127.0.0.1:{port}/control"
+            with pytest.raises(InvalidStatus):
+                async with connect(url, origin="https://another.example"):
+                    pass
+            async with connect(url, origin="https://car.example") as ws:
+                await ws.send(json.dumps({"type": "auth", "token": token}))
+                assert json.loads(await ws.recv())["type"] == "ready"
+        finally:
+            demo.server.close()
+            await demo.server.wait_closed()
+            await tank.close()
+
+    asyncio.run(run())

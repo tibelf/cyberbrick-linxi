@@ -42,9 +42,19 @@ class CloudDemo:
             return Response(200, "OK", headers, PAGE.read_bytes())
         return Response(404, "Not Found", headers, b"not found")
 
-    async def start(self, port: int):
-        # 不提供公网监听选项；当前原型不能直接放到公网或反向代理后。
+    async def start(self, port: int, https_origin: str | None = None):
+        # 始终只监听回环地址；反向代理需要另行配置 HTTPS 和访问保护。
         origins = [f"http://localhost:{port}", f"http://127.0.0.1:{port}"]
+        if https_origin:
+            parsed = urlsplit(https_origin)
+            if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
+                    or parsed.path or parsed.query or parsed.fragment or https_origin.endswith("/")):
+                raise ValueError("代理来源必须是完整的 HTTPS 来源，例如 https://car.example.com")
+            try:
+                parsed.port  # 检查端口是否合法
+            except ValueError as exc:
+                raise ValueError("代理来源端口不合法") from exc
+            origins.append(https_origin)
         self.server = await serve(self._handle, "127.0.0.1", port, origins=origins,
                                   process_request=self._http, max_size=4096, max_queue=8,
                                   ping_interval=10, ping_timeout=10, close_timeout=2)
@@ -97,14 +107,14 @@ class CloudDemo:
                     self._controller = None
 
 
-async def _run(port: int, token: str):
+async def _run(port: int, token: str, https_origin: str | None = None):
     # 这里固定模拟后端，避免误接真实车辆；发射始终关闭。
     tank = TankExecutor(MockBackend(), max_speed=40, fire_enabled=False)
     demo = CloudDemo(tank, token)
     await tank.start()
     try:
-        await demo.start(port)
-        print(f"模拟控制台：http://127.0.0.1:{port}/（只能在服务器本机或 SSH 隧道中访问）")
+        await demo.start(port, https_origin)
+        print(f"模拟控制台监听 127.0.0.1:{port}（只能通过本机、SSH 隧道或受保护的 HTTPS 代理访问）")
         async with demo.server:
             await asyncio.Future()  # 不依赖 stdin，适合无交互测试
     finally:
@@ -112,14 +122,15 @@ async def _run(port: int, token: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="仅限本机或 SSH 隧道使用的模拟云控车原型")
+    parser = argparse.ArgumentParser(description="仅监听本机的模拟云控车原型")
     parser.add_argument("--port", type=int, default=18765, help="本机监听端口（默认 18765）")
+    parser.add_argument("--https-origin", help="可选的 HTTPS 代理来源；需另外配置鉴权及限流")
     args = parser.parse_args()
     token = os.environ.get("CAR_DEMO_TOKEN", "")
     if len(token) < 32:
         parser.error("请通过 CAR_DEMO_TOKEN 环境变量设置至少 32 个字符的随机密码")
     try:
-        asyncio.run(_run(args.port, token))
+        asyncio.run(_run(args.port, token, args.https_origin))
     except KeyboardInterrupt:
         print("模拟控制台已停止")
 

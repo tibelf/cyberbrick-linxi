@@ -12,7 +12,7 @@
 
 ## 进行中
 
-- **（2026-10-30）云端模拟原型**：新增 `linx-client/linx_client/cloud_demo.py`、`web/cloud-demo.html` 和 `tests/test_cloud_demo.py`，仅监听本机、只用 MockBackend、锁定发射；需随机密码，限定本机 Origin，同时只允许一位控制者，按住按键发短时限速动作，断线执行停车。`docs/云端模拟验证.md` 记录本机或 SSH 隧道运行方法。当前原型没有灵矽语音、摄像头或实车网关，不能直接公网部署。
+- **（2026-10-30）云端模拟原型**：新增 `linx-client/linx_client/cloud_demo.py`、`web/cloud-demo.html` 和 `tests/test_cloud_demo.py`，仅监听本机、只用 MockBackend、锁定发射；需随机密码，限定本机 Origin，同时只允许一位控制者，按住按键发短时限速动作，断线执行停车。可指定单个 HTTPS 代理来源，但仍只监听回环地址，公网代理需另设鉴权与限流。`docs/云端模拟验证.md` 记录本机或 SSH 隧道运行方法。当前原型没有灵矽语音、摄像头或实车网关。
 
 - **（2026-10-30）云服务器只读检查**：`ssh volcyun` 连接成功，Ubuntu 24.04、Python 3.12 和 venv 可用，现有 Nginx/Docker 服务运行中，80/443 端口已有服务。未修改服务器；准备隔离的云端控制链路；用户已提供 Cloudflare 域名和授权，需检查既有记录再选择子域名。
 
@@ -123,7 +123,7 @@
 
 ## 已验证 / 未验证
 
-2026-10-30 云端模拟原型：`tests/test_cloud_demo.py tests/test_web.py tests/test_executor.py` 共 **16 passed**，覆盖模拟密码校验、Origin 限制、单一控制者、限速调用、禁止开火和断线调用停车；修正测试弃用警告后重跑新测试 **2 passed**。均在 Mac 使用假车、本机 WebSocket，未在手机、真实车辆、云服务器公网、摄像头或灵矽验证。
+2026-10-30 云端模拟原型：`tests/test_cloud_demo.py tests/test_web.py tests/test_executor.py` 共 **16 passed**，覆盖模拟密码校验、Origin 限制、单一控制者、限速调用、禁止开火和断线调用停车；添加 HTTPS 代理来源限制后重跑相关测试 **17 passed**。均在 Mac 使用假车、本机 WebSocket，未在手机、真实车辆、云服务器公网、摄像头或灵矽验证。
 
 2026-10-30 云端方案：静态检查 `web.py`、网页 JS、`session.py`、`tank/udp.py`、车端 `wifi_main.py`、命令行入口及 MDN HTTPS/WebSocket 文档；`.venv/bin/python -m pytest -q tests/test_web.py tests/test_udp.py` 为 **6 passed in 3.60s**，只覆盖本机/假设备，未部署云服务器、接入真实手机、车载网关、视频或远端语音。反向代理权限、stdin EOF 和局域网限制是对现有代码的推断，不是本次线上实测。
 
