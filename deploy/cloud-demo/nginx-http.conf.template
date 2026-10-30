@@ -1,0 +1,12 @@
+# 签发证书期间，仅开放当前站点的 ACME 校验路径。
+server {
+    listen 80;
+    server_name __DOMAIN__;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/cyberbrick-cloud-demo;
+        try_files $uri =404;
+    }
+
+    location / { return 503; }
+}

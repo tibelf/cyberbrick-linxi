@@ -1,0 +1,21 @@
+[Unit]
+Description=CyberBrick 云端模拟控制台
+After=network.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+WorkingDirectory=/srv/cyberbrick-cloud-demo
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/etc/cyberbrick-cloud-demo/credentials.env
+ExecStart=/srv/cyberbrick-cloud-demo/.venv/bin/python -m linx_client.cloud_demo --port 18765 --https-origin https://__DOMAIN__
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

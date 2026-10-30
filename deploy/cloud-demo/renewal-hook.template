@@ -1,0 +1,9 @@
+#!/bin/sh
+# 只在本演示站点的证书续期后检查并重载 Nginx。
+set -e
+case " ${RENEWED_DOMAINS:-} " in
+    *" __DOMAIN__ "*)
+        output=$(/usr/sbin/nginx -t 2>&1) || { printf '%s\n' "$output" >&2; exit 1; }
+        /usr/bin/systemctl reload nginx
+        ;;
+esac
