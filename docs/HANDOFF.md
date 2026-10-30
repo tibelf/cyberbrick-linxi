@@ -2,7 +2,7 @@
 
 > 每个 agent 收工前更新本文件并提交。按时间倒序记录，最新的写在最上面。规则见 `AGENTS.md`「交接协议」。
 
-**最后更新**：2026-10-30 · Codex（车载前视视觉方案调研）；历史功能记录见下文
+**最后更新**：2026-10-30 · Codex（低价车载摄像头硬件调研）；历史功能记录见下文
 
 ## 当前状态
 
@@ -12,7 +12,9 @@
 
 ## 进行中
 
-- **（2026-10-30）车载视觉优先**：用户明确目前主要想让小车有视觉，并选择摄像头安装在车上、随车朝前看。AI Passport [公开规格](https://github.com/FoloToy/ai-passport/blob/main/docs/hardware-design/specifications.zh_CN.md)没有列内置摄像头；其[硬件指南](https://github.com/FoloToy/ai-passport/blob/main/docs/hardware-design/AI_HARDWARE_DEVELOPMENT_GUIDE.zh_CN.md)称无 PSRAM、已用 GPIO 为 0–10 和 18–21，其他 GPIO 不属于公开应用接口，不要假设摄像头能直接接上。现有 PC 程序 `camera.py` 可读 HTTP JPEG 快照；`--camera-view front` 会启用车载前视提问，`seek.py` 也有根据视觉回答寻找、转向、接近的代码，但距离以图像占比粗估，不能视为可靠避障。优先用之前用过 IP Webcam 的安卓手机前视取图做台架试验；长期可比较独立 Wi-Fi 摄像头板和带摄像头、音频的整合板，仍需适配与实测。当前摄像头及视觉调度仍由电脑处理，AI Passport 接入摄像头、灵矽及直接控车都未完成。
+- **（2026-10-30）低价车载摄像头硬件调研**：用户明确不使用手机摄像头，希望购买便宜实惠的摄像头硬件。建议优先比较安信可型 ESP32-CAM + OV2640 镜头 + ESP32-CAM-MB 烧录底座，确认实物含镜头、4 MB PSRAM、烧录接口及供电；ESP32-CAM 是自带 Wi-Fi 的独立开发板，不是 S3。乐鑫 Arduino `CameraWebServer` [提供 JPEG `/capture`](https://github.com/espressif/arduino-esp32/blob/master/libraries/ESP32/examples/Camera/CameraWebServer/app_httpd.cpp)，[板型引脚配置](https://github.com/espressif/arduino-esp32/blob/master/libraries/ESP32/examples/Camera/CameraWebServer/camera_pins.h)包括 AI-Thinker；板端需烧录适配固件，原有电脑程序可读 JPEG 快照，仍须实测。另一个候选是 [微雪 ESP32-S3-CAM-GC0308](https://spotpear.cn/shop/ESP32-S3-CAM-Camera-Image-Acquisition-Image-Recognition/ESP32-S3-CAM-GC0308.html)，具备相机、麦克风、功放及喇叭接口，可能整合语音与视觉；[小智对应板型](https://github.com/78/xiaozhi-esp32/blob/addb1ed59bd71e09a6a5e0c52ad2f1c474aa8ca1/main/boards/waveshare/esp32-s3-cam/README.md)已有源码，但列出的构建均配置了屏幕，无屏运行、外接喇叭、灵矽、控车及供电未验证。2026-10-30 查到商家页面 S3 GC0308 型号显示 88.9 元；另一 [ESP32-CAM 商品页](https://www.elecbee.com/zh_cn/product-detail/esp32-cam-development-board-with-ov2640-camera-module-receiver-wifi-digital-bluetooth-module-kit_73354)显示约 63.53/74.73 元，标题标 OV2640 + Type-C 编程器，但套餐描述只写开发板，镜头是否随货须问商家。商品价格、邮费和供应均可能变化，用户尚未选型或购买。
+
+- **（2026-10-30）车载视觉优先**：用户明确目前主要想让小车有视觉，并选择摄像头安装在车上、随车朝前看，随后明确不使用手机摄像头。AI Passport [公开规格](https://github.com/FoloToy/ai-passport/blob/main/docs/hardware-design/specifications.zh_CN.md)没有列内置摄像头；其[硬件指南](https://github.com/FoloToy/ai-passport/blob/main/docs/hardware-design/AI_HARDWARE_DEVELOPMENT_GUIDE.zh_CN.md)称无 PSRAM、已用 GPIO 为 0–10 和 18–21，其他 GPIO 不属于公开应用接口，不要假设摄像头能直接接上。现有 PC 程序 `camera.py` 可读 HTTP JPEG 快照；`--camera-view front` 会启用车载前视提问，`seek.py` 也有根据视觉回答寻找、转向、接近的代码，但距离以图像占比粗估，不能视为可靠避障。应比较独立 Wi-Fi 摄像头板和带摄像头、音频的整合板，仍需适配与实测。当前摄像头及视觉调度仍由电脑处理，AI Passport 接入摄像头、灵矽及直接控车都未完成。
 
 - **（2026-10-30）AI Passport 候选调研完成**：用户已确认手头有 AI Passport 实物。用户提供的[教程](https://ai-passport.folotoy.cn/guides/create-a-play-with-agent/)是用 AI 编程 Agent 开发 AI Passport 固件的通用流程，并不是现成的灵矽控车方案。官方[设备规格](https://github.com/FoloToy/ai-passport/blob/main/docs/hardware-design/specifications.zh_CN.md)称 AI Passport 是独立的 ESP32-C3 设备，自带麦克风、扬声器、屏幕、Wi-Fi 和电池；不是车上现有的 CyberBrick Core。[对应小智固件](https://github.com/FoloToy/folo-ai-passport-xiaozhi/tree/3ecff6fe829e33d9e98a6f4bcf8eab1ffa7002ba)有专用板型和设备端 MCP 实现，默认 OTA 地址并非灵矽，代码支持配置 OTA 地址，但保存的 `wifi/ota_url` 优先于编译默认值。可作为另一种车载语音候选：让 AI Passport 接灵矽并经局域网控制现有 Core，仍需适配端侧工具、动作排程、保护和 UDP 通信。其 C3 无 PSRAM，内存、装车和续航需实测；现有电脑端视觉等功能不会自动迁移。未确认赛事对设备形态的认可，也未确定最终硬件方案。
 
@@ -77,7 +79,7 @@
 
 ## 下一步（按优先级）
 
-- **验证车载视角（2026-10-30，尚未实施）**：先确认能否将之前用过 IP Webcam 的安卓手机稳定、朝前固定到车上（负重未知，可先在桌面静态验证），让手机与电脑加入可互通的 Wi-Fi；取得实际 JPEG 快照地址，例如 `http://<手机IP>:8080/shot.jpg`。在 `linx-client/` 下用 `.venv/bin/python -m linx_client camera-test --camera '<实际JPEG快照地址>'` 保存照片，确认视野和方向；再配置灵矽视觉分析，用 `run --backend mock --no-fire --camera '<地址>' --camera-view front` 验证“前面有什么”，不驱动实车。之后再卸弹、架空、低速检验转向及失联停止，落地前评估避障和丢画面策略。若目标为不依赖电脑的车载展示，需另做设备端视觉取图/上传、会话、调度和安全控制；设备与两板之间的通信、内存、续航都须实测。上面的手机方式仍依赖电脑，不能宣称已解决硬件端灵矽接入。
+- **验证车载视角（2026-10-30，尚未实施）**：遵循用户不使用手机摄像头的要求，选购/取得具体摄像头硬件并核对镜头、PSRAM、烧录和供电。若选择 AI-Thinker ESP32-CAM，先为它安装匹配板型的 JPEG 快照程序并接入可互通的 2.4 GHz Wi-Fi；在 `linx-client/` 下用 `.venv/bin/python -m linx_client camera-test --camera 'http://<摄像头IP>/capture'` 保存照片（`/capture` 仅在所烧录程序提供时有效），确认视野和方向；再配置灵矽视觉分析，用 `run --backend mock --no-fire --camera '<地址>' --camera-view front` 验证“前面有什么”，不驱动实车。之后再卸弹、架空、低速检验转向及失联停止，落地前评估避障和丢画面策略。若目标为不依赖电脑的车载展示，需另做设备端视觉取图/上传、会话、调度和安全控制；设备间通信、内存、续航都须实测。仅加摄像头并沿用电脑程序不能解决硬件端灵矽接入。
 
 - **评估 AI Passport（2026-10-30，尚未实施）**：用户已有实物，优先核查其当前固件、尺寸、负载、续航和专用固件可编译性；先核对并保留身份及配置分区，再验证小智固件的 OTA 配置、灵矽绑定和完整语音。随后实现独立端侧 MCP、动作队列／急停／限速／发射锁定和到现有 Core 的 UDP 适配，先卸弹、架空验证，再验证断连停车及重复包。官方仓库提示从 0x0 刷合并镜像可能覆盖 NVS，不能将它当作保留原配置的操作。实测成功前不能声称已支持灵矽或控车。
 
@@ -108,6 +110,8 @@
 3. **M1 收尾**：真实麦克风说话测试，确认外放回声不会触发误识别（必要时戴耳机）
 
 ## 已验证 / 未验证
+
+2026-10-30 摄像头选型：静态查阅安信可规格、乐鑫示例、商品选项及小智仓库板型代码；未接入摄像头实物、未烧录、未验证网络图像、供电、车载灵知或无屏运行。商品页面是当日调研时的价格与描述，未下单，价格、实际到货配置及运费需再次核实。
 
 2026-10-30 车载视觉：静态检查 `camera.py`、`seek.py`、命令行参数及灵矽拍照、设备规格和摄像头文档；在 `linx-client/` 用 `.venv/bin/python -m pytest -q tests/test_camera.py tests/test_seek.py` 得到 **28 passed in 15.42s**，为模拟/代码测试。本次未连接手机或 AI Passport，未测试车载视野、网络、灵矽视觉、目标识别、实车转向/避障和无电脑方案。旧有的历史灵矽视觉实测不代表本次车载前视已通过。
 
@@ -141,7 +145,7 @@
 
 ## 已确认事实
 
-- **用户目标（2026-10-30 最新确认）**：目前主要希望小车具备视觉，并选择摄像头装在车上、随车观察；是意图，并非已有车载视觉或已选定摄像头硬件。
+- **用户目标（2026-10-30 最新确认）**：目前主要希望小车具备视觉，摄像头装在车上、随车观察；明确不用手机摄像头，希望购买便宜实惠的摄像头硬件。是意图，并非已有车载视觉或已选定摄像头硬件。
 
 - **现有硬件（用户 2026-10-30 最新确认）**：手头有 AI Passport 实物和现有 CyberBrick 小车。用户在本次调研较早时候曾说只有小车，后续澄清已有 AI Passport；具体设备状态及能否固定到车上待查，赛事方是否指定型号仍待确认。
 
@@ -195,6 +199,8 @@
 - 比赛日期和演示形式
 
 ## 决策记录
+
+- **2026-10-30**：用户排除手机摄像头方案；低成本先比较标准 ESP32-CAM + OV2640 + 烧录底座，识图仍由灵矽云完成，现有电脑客户端可作为首个验证路径。独立摄像头并不会让 AI Passport 自动接入灵矽或消除电脑，若要脱离电脑需适配设备端。也可比较原生语音+视觉 S3 板的总成本和软件成熟度，不因已有 Passport 就排除一体板，但不把其小智源码视为已验证的灵矽或控车固件。
 
 - **2026-10-30**：按用户新优先级先验证车载视角和视觉问答，后比较 Wi-Fi 摄像头板 + AI Passport 与集成音频和摄像头的其他板；不再以单独语音接入为唯一第一步。灵矽视觉是联网的图片分析，现有代码用单张快照而非实时视频理解；移动避障、视觉中断停车和 PC 算法移植必须独立设计和实测，不能沿用仅基于目标占画面比例的近距离判断当可靠避障。现有闲逛丢视觉后会闭眼慢逛，正式展示若需丢画面停车必须另行修改和测试。
 
