@@ -32,6 +32,7 @@ class CloudDemo:
         self._outgoing = None
         self.session = None
         self.audio_format = None
+        self.activation_code = None
         self.linx_state = "offline"
 
     @staticmethod
@@ -73,8 +74,14 @@ class CloudDemo:
             self.linx_state = event.get("state", "offline")
             if self.linx_state != "connected":
                 self.audio_format = None
+            else:
+                self.on_activation(None)
         if event.get("type") in ("conn", "user", "bot", "speaking"):
             self.publish({"type": "linx_event", "event": event})
+
+    def on_activation(self, code):
+        self.activation_code = code
+        self.publish({"type": "activation", "code": code})
 
     @staticmethod
     async def _send_loop(ws, queue):
@@ -122,6 +129,8 @@ class CloudDemo:
             await ws.send(json.dumps({"type": "ready", "mode": "模拟小车", "linx": self.linx_state},
                                      ensure_ascii=False))
             sender = asyncio.create_task(self._send_loop(ws, self._outgoing))
+            if self.activation_code:
+                self.publish({"type": "activation", "code": self.activation_code})
             if self.audio_format:
                 self.publish({"type": "audio_format", **self.audio_format})
             async for raw in ws:
@@ -170,17 +179,40 @@ class CloudDemo:
                             pass
 
 
-async def _run(port: int, token: str, https_origin: str | None = None):
+async def _run(port: int, token: str, https_origin: str | None = None, linx_state: str | None = None):
     # 这里固定模拟后端，避免误接真实车辆；发射始终关闭。
     tank = TankExecutor(MockBackend(), max_speed=40, fire_enabled=False)
     demo = CloudDemo(tank, token)
     await tank.start()
+    runner = None
     try:
+        if linx_state:
+            from .cloud_audio import BrowserLinxSession
+            from .cloud_linx import make_cloud_endpoint
+            from .identity import load_or_create
+            from .mcp import McpServer
+            from .tools import register_tank_tools
+
+            ident = load_or_create(linx_state)
+            loop = asyncio.get_running_loop()
+            endpoint = make_cloud_endpoint(ident, lambda code: loop.call_soon_threadsafe(demo.on_activation, code))
+            mcp = McpServer()
+            register_tank_tools(mcp, tank)
+            demo.session = BrowserLinxSession(ident, mcp, endpoint, on_pcm=demo.publish,
+                                             on_format=demo.on_audio_format, on_flush=demo.on_audio_flush,
+                                             on_event=demo.on_linx_event)
+            tank.on_error = lambda message: demo.publish({"type": "error", "message": message})
+            runner = asyncio.create_task(demo.session.run_forever())
         await demo.start(port, https_origin)
         print(f"模拟控制台监听 127.0.0.1:{port}（只能通过本机、SSH 隧道或受保护的 HTTPS 代理访问）")
         async with demo.server:
             await asyncio.Future()  # 不依赖 stdin，适合无交互测试
     finally:
+        if demo.session:
+            await demo.session.close()
+        if runner:
+            runner.cancel()
+            await asyncio.gather(runner, return_exceptions=True)
         await tank.close()
 
 
@@ -188,12 +220,13 @@ def main():
     parser = argparse.ArgumentParser(description="仅监听本机的模拟云控车原型")
     parser.add_argument("--port", type=int, default=18765, help="本机监听端口（默认 18765）")
     parser.add_argument("--https-origin", help="可选的 HTTPS 代理来源；需另外配置鉴权及限流")
+    parser.add_argument("--linx-state", help="可选的独立灵矽设备身份文件（仅支持模拟车）")
     args = parser.parse_args()
     token = os.environ.get("CAR_DEMO_TOKEN", "")
     if len(token) < 32:
         parser.error("请通过 CAR_DEMO_TOKEN 环境变量设置至少 32 个字符的随机密码")
     try:
-        asyncio.run(_run(args.port, token, args.https_origin))
+        asyncio.run(_run(args.port, token, args.https_origin, args.linx_state))
     except KeyboardInterrupt:
         print("模拟控制台已停止")
 

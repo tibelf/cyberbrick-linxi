@@ -8,13 +8,14 @@ DynamicUser=yes
 WorkingDirectory=/srv/cyberbrick-cloud-demo
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=/etc/cyberbrick-cloud-demo/credentials.env
-ExecStart=/srv/cyberbrick-cloud-demo/.venv/bin/python -m linx_client.cloud_demo --port 18765 --https-origin https://__DOMAIN__
+ExecStart=/srv/cyberbrick-cloud-demo/.venv/bin/python -m linx_client.cloud_demo --port 18765 --https-origin https://__DOMAIN__ --linx-state /var/lib/cyberbrick-cloud-demo/identity.json
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectHome=yes
 ProtectSystem=strict
+StateDirectory=cyberbrick-cloud-demo
 UMask=0077
 
 [Install]

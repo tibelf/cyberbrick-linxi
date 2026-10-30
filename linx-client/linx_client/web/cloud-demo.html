@@ -151,6 +151,9 @@
         voiceStatus.textContent = audioContext ? '语音已启用，按住说话' : '灵矽已连接，可以启用语音';
       }
       if (message.type === 'audio_flush') flushAudio();
+      if (message.type === 'activation' && message.code) {
+        voiceStatus.textContent = `请在灵矽智控台的设备管理中绑定，激活码：${message.code}`;
+      }
       if (message.type === 'linx_event') {
         const item = message.event;
         if (item.type === 'conn' && item.state !== 'connected') { closeAudio(); voiceStatus.textContent = '灵矽连接中断'; }
