@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>小车云端控制测试</title>
+  <style>
+    body { font: 16px system-ui, sans-serif; background: #f4f6f8; color: #18212b; margin: 0; }
+    main { max-width: 500px; margin: auto; padding: 1.2rem; }
+    section { background: white; border-radius: 12px; padding: 1rem; margin: 1rem 0; }
+    h1 { font-size: 1.4rem; } p { line-height: 1.5; }
+    input { box-sizing: border-box; width: 100%; padding: .8rem; font-size: 1rem; }
+    button { border: 0; border-radius: 8px; padding: .8rem; font-size: 1rem; cursor: pointer; }
+    #login button { margin-top: .5rem; background: #2065cb; color: white; }
+    .pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
+    .pad button { min-height: 65px; touch-action: none; user-select: none; background: #dae9ff; }
+    .pad button:disabled { opacity: .5; } .pad .stop { background: #df3030; color: white; }
+    .view { min-height: 110px; display: grid; place-items: center; background: #e5e8eb; color: #4a5562; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>小车云端控制测试</h1>
+  <p>模拟模式：不会连接实车或发射。画面与语音尚未接入。</p>
+  <section>
+    <form id="login">
+      <label for="token">控制密码</label>
+      <input id="token" type="password" autocomplete="off" required>
+      <button type="submit">连接</button>
+    </form>
+    <p id="status" role="status">未连接</p>
+  </section>
+  <section><div class="view">车载摄像头尚未连接</div></section>
+  <section>
+    <p>按住方向键移动，松手停车</p>
+    <div class="pad">
+      <span></span><button data-direction="forward" disabled>前进</button><span></span>
+      <button data-direction="left" disabled>左转</button><button class="stop" id="stop" disabled>停车</button><button data-direction="right" disabled>右转</button>
+      <span></span><button data-direction="backward" disabled>后退</button><span></span>
+    </div>
+  </section>
+</main>
+<script>
+  let ws, timer, activePointer;
+  const status = document.querySelector('#status');
+  const buttons = document.querySelectorAll('.pad button');
+  function send(message) {
+    if (ws && ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 65536) ws.send(JSON.stringify(message));
+  }
+  function stop() {
+    clearInterval(timer); timer = null; activePointer = null;
+    send({type: 'stop'});
+  }
+  function enable(on) { buttons.forEach(button => button.disabled = !on); }
+  document.querySelector('#login').addEventListener('submit', event => {
+    event.preventDefault();
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+    const input = document.querySelector('#token');
+    const token = input.value; input.value = '';
+    const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${scheme}//${location.host}/control`);
+    status.textContent = '正在连接';
+    ws.onopen = () => send({type: 'auth', token});
+    ws.onmessage = event => {
+      const message = JSON.parse(event.data);
+      if (message.type === 'ready') { status.textContent = '已连接：模拟小车'; enable(true); }
+      if (message.type === 'error') status.textContent = message.message;
+    };
+    ws.onclose = event => { clearInterval(timer); timer = null; activePointer = null; enable(false); status.textContent = event.reason || '连接已断开'; };
+  });
+  document.querySelectorAll('[data-direction]').forEach(button => {
+    button.addEventListener('pointerdown', event => {
+      if (activePointer != null) return;
+      event.preventDefault(); activePointer = event.pointerId; button.setPointerCapture(event.pointerId);
+      const move = () => send({type: 'drive', direction: button.dataset.direction});
+      move(); timer = setInterval(move, 120);
+    });
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(name => button.addEventListener(name, event => {
+      if (event.pointerId === activePointer) stop();
+    }));
+  });
+  document.querySelector('#stop').addEventListener('click', stop);
+  window.addEventListener('blur', stop);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); });
+</script>
+</body>
+</html>
