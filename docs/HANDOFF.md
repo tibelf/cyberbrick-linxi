@@ -12,7 +12,7 @@
 
 ## 进行中
 
-- **（2026-10-30）云端语音适配准备**：新增 `linx-client/linx_client/cloud_audio.py` 与 `tests/test_cloud_audio.py`，复用 `LinxSession`，把浏览器 16kHz、16 位、20ms PCM 帧放入有界队列，关闭麦克风时发静音；下行目前仅支持单声道 16 位小端 PCM，半双工，估计播报尾音。适配层尚未连接网页、云服务、真实平台或麦克风，不能当成语音可用。
+- **（2026-10-30）云端语音适配准备**：新增 `linx-client/linx_client/cloud_audio.py` 与 `tests/test_cloud_audio.py`，复用 `LinxSession`，把浏览器 16kHz、16 位、20ms PCM 帧放入有界队列，关闭麦克风时发静音；下行目前仅支持单声道 16 位小端 PCM，半双工，估计播报尾音。已在本地把适配层接到模拟网页：浏览器通过 AudioWorklet 采集并转换为 PCM，按住说话、松手发送静音，服务端经 WebSocket 转发并接收 TTS。尚未将语音版部署到云站点，也未连接真实平台或真实麦克风，不能当成语音可用。
 
 - **（2026-10-30）云端模拟站点已部署**：Cloudflare 新增 `car.vibemill.top` 的独立 A 记录（DNS only），现有记录未改；专用 Nginx 配置提供 HTTPS、Basic Auth 和限流，应用层 WebSocket 再校验密码与 Origin。新增隔离 systemd 服务 `cyberbrick-cloud-demo`，Python 环境在 `/srv/cyberbrick-cloud-demo/`，只监听服务器本机 `127.0.0.1:18765`，只能操作 MockBackend 且禁用发射。随机密码由服务器生成并保存在 root 私有文件，取用方法、证书续期和配置模板见 `docs/云端模拟验证.md`；绝不能把密码或 Cloudflare 密钥写入仓库。真实车载摄像头、语音、灵矽会话和实车网关均未接入。
 
@@ -127,7 +127,7 @@
 
 ## 已验证 / 未验证
 
-2026-10-30 云端音频适配：`tests/test_cloud_audio.py tests/test_session.py tests/test_session_events.py tests/test_audio.py` **13 passed**；假灵矽平台验证静音/PCM 上行及 PCM 下行回调，另验证音频积压丢旧帧和拒绝不支持的 Opus。未验证手机采样、浏览器播放、真实灵矽、现场回声或设备。
+2026-10-30 云端音频适配：`tests/test_cloud_audio.py tests/test_session.py tests/test_session_events.py tests/test_audio.py` **13 passed**；假灵矽平台验证静音/PCM 上行及 PCM 下行回调，另验证音频积压丢旧帧和拒绝不支持的 Opus。后续扩展后运行相关测试 **19 passed**，新增手机 WebSocket → 假平台音频往返测试；桌面 Chrome 的 390×844 视口用模拟麦克风向假平台发送了非静音 640 字节帧，并收到 TTS 文本及音频回调。未验证真实手机采样及外放、真实灵矽、现场回声或设备，也未部署这一版网页。
 
 2026-10-30 云端模拟站点：服务器本机 HTTP + WebSocket 通过，服务监听回环且 systemd 常驻；公网 HTTPS 未认证返回 401、HTTP 跳转 301，正确密码可访问页面和 WSS，错误来源被拒绝、错误应用密码被拒绝；公网指令在服务器日志中记录为模拟限速前进与停车。桌面 Chrome 模拟 390×844 手机视口，实际登录网页、按住/松开按钮，日志出现模拟前进及停车；尚未用真实手机测试。Certbot 针对本证书 dry-run 续期成功、续期后重载钩子单独验证，证书至 2027-01-28。未连接灵矽、真实音频、摄像头、车载固件或实车，没做真实弱网/丢包验证；现有其他站点配置文件未修改，仅检查 Nginx 服务仍 active，未逐一功能回归。
 

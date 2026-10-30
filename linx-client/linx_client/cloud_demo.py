@@ -16,6 +16,7 @@ from websockets.http11 import Response
 from .tank import MockBackend, TankExecutor
 
 PAGE = Path(__file__).with_name("web") / "cloud-demo.html"
+WORKLET = Path(__file__).with_name("web") / "microphone-worklet.js"
 AUTH_TIMEOUT_S = 5
 
 
@@ -28,6 +29,10 @@ class CloudDemo:
         self.tank = tank
         self._token = token
         self._controller = None
+        self._outgoing = None
+        self.session = None
+        self.audio_format = None
+        self.linx_state = "offline"
 
     @staticmethod
     def _http(connection, request):
@@ -40,7 +45,41 @@ class CloudDemo:
                            ("X-Frame-Options", "DENY")])
         if path == "/":
             return Response(200, "OK", headers, PAGE.read_bytes())
+        if path == "/microphone-worklet.js":
+            script_headers = Headers([("Content-Type", "text/javascript; charset=utf-8"),
+                                      ("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff")])
+            return Response(200, "OK", script_headers, WORKLET.read_bytes())
         return Response(404, "Not Found", headers, b"not found")
+
+    def publish(self, message):
+        """音频和事件按顺序发给当前控制者；网络积压时断开而不是播放过时语音。"""
+        if self._outgoing is None:
+            return
+        if self._outgoing.full():
+            asyncio.create_task(self._controller.close(code=1013, reason="网络缓冲已满"))
+            return
+        data = message if isinstance(message, bytes) else json.dumps(message, ensure_ascii=False)
+        self._outgoing.put_nowait(data)
+
+    def on_audio_format(self, audio_format):
+        self.audio_format = audio_format
+        self.publish({"type": "audio_format", **audio_format})
+
+    def on_audio_flush(self):
+        self.publish({"type": "audio_flush"})
+
+    def on_linx_event(self, event):
+        if event.get("type") == "conn":
+            self.linx_state = event.get("state", "offline")
+            if self.linx_state != "connected":
+                self.audio_format = None
+        if event.get("type") in ("conn", "user", "bot", "speaking"):
+            self.publish({"type": "linx_event", "event": event})
+
+    @staticmethod
+    async def _send_loop(ws, queue):
+        while True:
+            await ws.send(await queue.get())
 
     async def start(self, port: int, https_origin: str | None = None):
         # 始终只监听回环地址；反向代理需要另行配置 HTTPS 和访问保护。
@@ -61,6 +100,7 @@ class CloudDemo:
 
     async def _handle(self, ws):
         owner = False
+        sender = None
         try:
             try:
                 raw = await asyncio.wait_for(ws.recv(), AUTH_TIMEOUT_S)
@@ -77,10 +117,20 @@ class CloudDemo:
                 await ws.close(code=4002, reason="已有控制者")
                 return
             self._controller = ws
+            self._outgoing = asyncio.Queue(maxsize=128)
             owner = True
-            await ws.send(json.dumps({"type": "ready", "mode": "模拟小车"}, ensure_ascii=False))
+            await ws.send(json.dumps({"type": "ready", "mode": "模拟小车", "linx": self.linx_state},
+                                     ensure_ascii=False))
+            sender = asyncio.create_task(self._send_loop(ws, self._outgoing))
+            if self.audio_format:
+                self.publish({"type": "audio_format", **self.audio_format})
             async for raw in ws:
                 try:
+                    if isinstance(raw, bytes):
+                        if self.session is None:
+                            raise RuntimeError("灵矽语音尚未接入")
+                        self.session.feed_microphone(raw)
+                        continue
                     cmd = json.loads(raw)
                     if not isinstance(cmd, dict):
                         raise ValueError("指令格式错误")
@@ -93,18 +143,31 @@ class CloudDemo:
                         if direction not in values:
                             raise ValueError("未知方向")
                         await self.tank.manual(*values[direction])
+                    elif cmd.get("type") == "mic":
+                        if self.session is None or not isinstance(cmd.get("on"), bool):
+                            raise ValueError("灵矽语音尚未接入")
+                        self.session.mic_enabled = cmd["on"]
                     else:
                         raise ValueError("未知指令")
-                except (ValueError, TypeError, json.JSONDecodeError) as exc:
-                    await ws.send(json.dumps({"type": "error", "message": str(exc)}, ensure_ascii=False))
+                except (ValueError, TypeError, RuntimeError) as exc:
+                    self.publish({"type": "error", "message": str(exc)})
         except ConnectionClosed:
             pass
         finally:
             if owner:
                 try:
+                    if self.session:
+                        self.session.mic_enabled = False
                     await self.tank.stop()
                 finally:
+                    self._outgoing = None
                     self._controller = None
+                    if sender:
+                        sender.cancel()
+                        try:
+                            await sender
+                        except (asyncio.CancelledError, ConnectionClosed):
+                            pass
 
 
 async def _run(port: int, token: str, https_origin: str | None = None):

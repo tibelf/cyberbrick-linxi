@@ -16,12 +16,14 @@
     .pad button { min-height: 65px; touch-action: none; user-select: none; background: #dae9ff; }
     .pad button:disabled { opacity: .5; } .pad .stop { background: #df3030; color: white; }
     .view { min-height: 110px; display: grid; place-items: center; background: #e5e8eb; color: #4a5562; }
+    .voice button { margin-right: .5rem; background: #dae9ff; touch-action: none; }
+    .voice button:disabled { opacity: .5; }
   </style>
 </head>
 <body>
 <main>
   <h1>小车云端控制测试</h1>
-  <p>模拟模式：不会连接实车或发射。画面与语音尚未接入。</p>
+  <p>模拟模式：不会连接实车或发射。车载画面尚未接入。</p>
   <section>
     <form id="login">
       <label for="token">控制密码</label>
@@ -31,6 +33,12 @@
     <p id="status" role="status">未连接</p>
   </section>
   <section><div class="view">车载摄像头尚未连接</div></section>
+  <section class="voice">
+    <p id="voice-status" role="status">灵矽语音尚未接入</p>
+    <button id="enable-audio" disabled>启用语音</button>
+    <button id="talk" disabled>按住说话</button>
+    <p id="transcript"></p>
+  </section>
   <section>
     <p>按住方向键移动，松手停车</p>
     <div class="pad">
@@ -42,7 +50,12 @@
 </main>
 <script>
   let ws, timer, activePointer;
+  let audioContext, stream, worklet, audioFormat, talkingPointer, playbackEnd = 0;
+  const playing = new Set();
   const status = document.querySelector('#status');
+  const voiceStatus = document.querySelector('#voice-status');
+  const enableAudio = document.querySelector('#enable-audio');
+  const talkButton = document.querySelector('#talk');
   const buttons = document.querySelectorAll('.pad button');
   function send(message) {
     if (ws && ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 65536) ws.send(JSON.stringify(message));
@@ -52,6 +65,73 @@
     send({type: 'stop'});
   }
   function enable(on) { buttons.forEach(button => button.disabled = !on); }
+  function flushAudio() {
+    playing.forEach(source => { try { source.stop(); } catch (_) {} });
+    playing.clear(); playbackEnd = 0;
+  }
+  function stopTalking() {
+    talkingPointer = null;
+    if (worklet) worklet.port.postMessage({enabled: false});
+    send({type: 'mic', on: false});
+  }
+  function closeAudio() {
+    stopTalking(); flushAudio();
+    if (stream) stream.getTracks().forEach(track => track.stop());
+    if (audioContext) audioContext.close();
+    stream = audioContext = worklet = audioFormat = null;
+    enableAudio.disabled = talkButton.disabled = true;
+  }
+  function playAudio(data) {
+    if (!audioContext || !audioFormat || data.byteLength % 2) return;
+    if (playbackEnd > audioContext.currentTime + 10) return;
+    const view = new DataView(data);
+    const buffer = audioContext.createBuffer(1, data.byteLength / 2, audioFormat.sample_rate);
+    const channel = buffer.getChannelData(0);
+    for (let i = 0; i < channel.length; i++) channel[i] = view.getInt16(i * 2, true) / 32768;
+    const source = audioContext.createBufferSource();
+    source.buffer = buffer; source.connect(audioContext.destination);
+    playbackEnd = Math.max(playbackEnd, audioContext.currentTime + .02);
+    source.start(playbackEnd); playbackEnd += buffer.duration;
+    playing.add(source); source.onended = () => playing.delete(source);
+  }
+  enableAudio.addEventListener('click', async () => {
+    const originalSocket = ws;
+    const originalFormat = audioFormat;
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error('当前浏览器不支持麦克风');
+      if (!originalSocket || originalSocket.readyState !== WebSocket.OPEN || !originalFormat) throw new Error('灵矽尚未连接');
+      stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount: 1, echoCancellation: true, noiseSuppression: true}});
+      if (ws !== originalSocket || originalSocket.readyState !== WebSocket.OPEN || !audioFormat) throw new Error('连接已断开');
+      audioContext = new AudioContext();
+      await audioContext.resume();
+      await audioContext.audioWorklet.addModule('/microphone-worklet.js');
+      if (ws !== originalSocket || originalSocket.readyState !== WebSocket.OPEN || !audioFormat) throw new Error('连接已断开');
+      const source = audioContext.createMediaStreamSource(stream);
+      const filter = audioContext.createBiquadFilter(); filter.type = 'lowpass';
+      filter.frequency.value = Math.min(7000, audioContext.sampleRate * .45);
+      worklet = new AudioWorkletNode(audioContext, 'microphone-pcm');
+      const silent = audioContext.createGain(); silent.gain.value = 0;
+      source.connect(filter).connect(worklet).connect(silent).connect(audioContext.destination);
+      worklet.port.onmessage = event => {
+        if (ws && ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 65536) ws.send(event.data);
+      };
+      enableAudio.disabled = true; talkButton.disabled = false;
+      voiceStatus.textContent = '语音已启用，按住说话';
+    } catch (error) {
+      closeAudio();
+      if (ws === originalSocket && originalSocket?.readyState === WebSocket.OPEN) audioFormat = originalFormat;
+      enableAudio.disabled = !audioFormat;
+      voiceStatus.textContent = `无法启用语音：${error.message}`;
+    }
+  });
+  talkButton.addEventListener('pointerdown', event => {
+    if (!worklet || talkingPointer != null) return;
+    event.preventDefault(); talkingPointer = event.pointerId; talkButton.setPointerCapture(event.pointerId);
+    send({type: 'mic', on: true}); worklet.port.postMessage({enabled: true});
+  });
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(name => talkButton.addEventListener(name, event => {
+    if (event.pointerId === talkingPointer) stopTalking();
+  }));
   document.querySelector('#login').addEventListener('submit', event => {
     event.preventDefault();
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
@@ -59,14 +139,26 @@
     const token = input.value; input.value = '';
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${scheme}//${location.host}/control`);
+    ws.binaryType = 'arraybuffer';
     status.textContent = '正在连接';
     ws.onopen = () => send({type: 'auth', token});
     ws.onmessage = event => {
+      if (event.data instanceof ArrayBuffer) { playAudio(event.data); return; }
       const message = JSON.parse(event.data);
       if (message.type === 'ready') { status.textContent = '已连接：模拟小车'; enable(true); }
+      if (message.type === 'audio_format') {
+        audioFormat = message; enableAudio.disabled = !!audioContext;
+        voiceStatus.textContent = audioContext ? '语音已启用，按住说话' : '灵矽已连接，可以启用语音';
+      }
+      if (message.type === 'audio_flush') flushAudio();
+      if (message.type === 'linx_event') {
+        const item = message.event;
+        if (item.type === 'conn' && item.state !== 'connected') { closeAudio(); voiceStatus.textContent = '灵矽连接中断'; }
+        if (item.type === 'user' || item.type === 'bot') document.querySelector('#transcript').textContent = `${item.type === 'user' ? '你' : '小车'}：${item.text || ''}`;
+      }
       if (message.type === 'error') status.textContent = message.message;
     };
-    ws.onclose = event => { clearInterval(timer); timer = null; activePointer = null; enable(false); status.textContent = event.reason || '连接已断开'; };
+    ws.onclose = event => { clearInterval(timer); timer = null; activePointer = null; enable(false); closeAudio(); voiceStatus.textContent = '灵矽语音尚未接入'; status.textContent = event.reason || '连接已断开'; };
   });
   document.querySelectorAll('[data-direction]').forEach(button => {
     button.addEventListener('pointerdown', event => {
@@ -80,8 +172,8 @@
     }));
   });
   document.querySelector('#stop').addEventListener('click', stop);
-  window.addEventListener('blur', stop);
-  document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); });
+  window.addEventListener('blur', () => { stop(); stopTalking(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { stop(); stopTalking(); } });
 </script>
 </body>
 </html>
