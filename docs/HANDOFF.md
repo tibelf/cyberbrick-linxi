@@ -16,7 +16,7 @@
 
 - **（2026-10-30）云端模拟站点已部署**：Cloudflare 新增 `car.vibemill.top` 的独立 A 记录（DNS only），现有记录未改；专用 Nginx 配置提供 HTTPS、Basic Auth 和限流，应用层 WebSocket 再校验密码与 Origin。新增隔离 systemd 服务 `cyberbrick-cloud-demo`，Python 环境在 `/srv/cyberbrick-cloud-demo/`，只监听服务器本机 `127.0.0.1:18765`，只能操作 MockBackend 且禁用发射。随机密码由服务器生成并保存在 root 私有文件，取用方法、证书续期和配置模板见 `docs/云端模拟验证.md`；绝不能把密码或 Cloudflare 密钥写入仓库。已部署浏览器语音和独立灵矽身份，用户已确认绑定并观察到真实平台握手；车载摄像头和实车网关尚未接通。
 
-- **（2026-10-30）云端模拟原型**：新增 `linx-client/linx_client/cloud_demo.py`、`web/cloud-demo.html` 和 `tests/test_cloud_demo.py`，仅监听本机、只用 MockBackend、锁定发射；需随机密码，限定本机 Origin，同时只允许一位控制者，按住按键发短时限速动作，断线执行停车。可指定单个 HTTPS 代理来源，但仍只监听回环地址，公网代理需另设鉴权与限流。`docs/云端模拟验证.md` 记录本机或 SSH 隧道运行方法。当前原型没有灵矽语音、摄像头或实车网关。
+- **（2026-10-30）云端模拟原型**：新增 `linx-client/linx_client/cloud_demo.py`、`web/cloud-demo.html` 和 `tests/test_cloud_demo.py`，仅监听本机、只用 MockBackend、锁定发射；需随机密码，限定本机 Origin，同时只允许一位控制者，按住按键发短时限速动作，断线执行停车。可指定单个 HTTPS 代理来源，但仍只监听回环地址，公网代理需另设鉴权与限流。`docs/云端模拟验证.md` 记录本机或 SSH 隧道运行方法。原型之后已加浏览器语音与灵矽连接，摄像头和实车网关尚未实现。
 
 - **（2026-10-30）云服务器只读检查**：`ssh volcyun` 连接成功，Ubuntu 24.04、Python 3.12 和 venv 可用，现有 Nginx/Docker 服务运行中，80/443 端口已有服务。该次初查未修改服务器；此后已按上条部署独立模拟站点。
 
@@ -24,7 +24,7 @@
 
 - **（2026-10-30）摄像头烧录准备**：用户表示不会烧录，需要尽量简化操作并由助手提供电脑端协助。选购建议为含 OV2640 镜头、烧录底座且排针已焊好的 ESP32-CAM 套装，并核实数据线；可问商家是否提供已烧录、可配置自有 2.4 GHz Wi-Fi 和 JPEG 单张快照的固件，但不同卖家的默认固件不能假定兼容。当前 Mac 的 `linx-client/.venv` 中 `python -m esptool version` 显示 5.6.0；`arduino-cli`、`pio` 未在 PATH 找到，也未在检查的 Arduino ESP32 包目录看到版本。当前未检测到明显外接设备串口，摄像头板尚未确认选型、准备固件或烧录。用户的 Wi-Fi 凭据不能提交公开仓库。
 
-- **（2026-10-30）低价车载摄像头硬件调研**：用户明确不使用手机摄像头，希望购买便宜实惠的摄像头硬件。建议优先比较安信可型 ESP32-CAM + OV2640 镜头 + ESP32-CAM-MB 烧录底座，确认实物含镜头、4 MB PSRAM、烧录接口及供电；ESP32-CAM 是自带 Wi-Fi 的独立开发板，不是 S3。乐鑫 Arduino `CameraWebServer` [提供 JPEG `/capture`](https://github.com/espressif/arduino-esp32/blob/master/libraries/ESP32/examples/Camera/CameraWebServer/app_httpd.cpp)，[板型引脚配置](https://github.com/espressif/arduino-esp32/blob/master/libraries/ESP32/examples/Camera/CameraWebServer/camera_pins.h)包括 AI-Thinker；板端需烧录适配固件，原有电脑程序可读 JPEG 快照，仍须实测。另一个候选是 [微雪 ESP32-S3-CAM-GC0308](https://spotpear.cn/shop/ESP32-S3-CAM-Camera-Image-Acquisition-Image-Recognition/ESP32-S3-CAM-GC0308.html)，具备相机、麦克风、功放及喇叭接口，可能整合语音与视觉；[小智对应板型](https://github.com/78/xiaozhi-esp32/blob/addb1ed59bd71e09a6a5e0c52ad2f1c474aa8ca1/main/boards/waveshare/esp32-s3-cam/README.md)已有源码，但列出的构建均配置了屏幕，无屏运行、外接喇叭、灵矽、控车及供电未验证。2026-10-30 查到商家页面 S3 GC0308 型号显示 88.9 元；另一 [ESP32-CAM 商品页](https://www.elecbee.com/zh_cn/product-detail/esp32-cam-development-board-with-ov2640-camera-module-receiver-wifi-digital-bluetooth-module-kit_73354)显示约 63.53/74.73 元，标题标 OV2640 + Type-C 编程器，但套餐描述只写开发板，镜头是否随货须问商家。商品价格、邮费和供应均可能变化，用户尚未选型或购买。
+- **（2026-10-30）低价车载摄像头硬件调研**：用户明确不使用手机摄像头，希望购买便宜实惠的摄像头硬件。建议优先比较安信可型 ESP32-CAM + OV2640 镜头 + ESP32-CAM-MB 烧录底座，确认实物含镜头、4 MB PSRAM、已焊排针、适合 Mac 的数据线与供电；ESP32-CAM 是自带 Wi-Fi 的独立开发板，不是 S3。[京东商品页](https://ic-item.jd.com/10138575906925.html)列有「ESP32-CAM开发板带摄像头+底座+烧录线」选项，但打开链接默认是另一规格，且未查到目标套餐售价、库存或具体镜头与排针状态，应以选项和商家确认为准。乐鑫 Arduino `CameraWebServer` [提供 JPEG `/capture`](https://github.com/espressif/arduino-esp32/blob/master/libraries/ESP32/examples/Camera/CameraWebServer/app_httpd.cpp)，[板型引脚配置](https://github.com/espressif/arduino-esp32/blob/master/libraries/ESP32/examples/Camera/CameraWebServer/camera_pins.h)包括 AI-Thinker；板端需烧录适配固件，原有电脑程序可读 JPEG 快照，仍须实测。另一个候选是 [微雪 ESP32-S3-CAM-GC0308](https://spotpear.cn/shop/ESP32-S3-CAM-Camera-Image-Acquisition-Image-Recognition/ESP32-S3-CAM-GC0308.html)，具备相机、麦克风、功放及喇叭接口，可能整合语音与视觉；[小智对应板型](https://github.com/78/xiaozhi-esp32/blob/addb1ed59bd71e09a6a5e0c52ad2f1c474aa8ca1/main/boards/waveshare/esp32-s3-cam/README.md)已有源码，但列出的构建均配置了屏幕，无屏运行、外接喇叭、灵矽、控车及供电未验证。2026-10-30 查到商家页面 S3 GC0308 型号显示 88.9 元；另一 [ESP32-CAM 商品页](https://www.elecbee.com/zh_cn/product-detail/esp32-cam-development-board-with-ov2640-camera-module-receiver-wifi-digital-bluetooth-module-kit_73354)显示约 63.53/74.73 元，标题标 OV2640 + Type-C 编程器，但套餐描述只写开发板，镜头是否随货须问商家。商品价格、邮费和供应均可能变化，用户尚未选型或购买。
 
 - **（2026-10-30）车载视觉优先**：用户明确目前主要想让小车有视觉，并选择摄像头安装在车上、随车朝前看，随后明确不使用手机摄像头。AI Passport [公开规格](https://github.com/FoloToy/ai-passport/blob/main/docs/hardware-design/specifications.zh_CN.md)没有列内置摄像头；其[硬件指南](https://github.com/FoloToy/ai-passport/blob/main/docs/hardware-design/AI_HARDWARE_DEVELOPMENT_GUIDE.zh_CN.md)称无 PSRAM、已用 GPIO 为 0–10 和 18–21，其他 GPIO 不属于公开应用接口，不要假设摄像头能直接接上。现有 PC 程序 `camera.py` 可读 HTTP JPEG 快照；`--camera-view front` 会启用车载前视提问，`seek.py` 也有根据视觉回答寻找、转向、接近的代码，但距离以图像占比粗估，不能视为可靠避障。应比较独立 Wi-Fi 摄像头板和带摄像头、音频的整合板，仍需适配与实测。当前摄像头及视觉调度仍由电脑处理，AI Passport 接入摄像头、灵矽及直接控车都未完成。
 
@@ -91,7 +91,7 @@
 
 ## 下一步（按优先级）
 
-- **云方案验证（2026-10-30，模拟站点已实施）**：用户希望网页看画面、按键控车、可语音控车，处理位置不限；可优先设计手机收音/播报、云端灵矽处理，但应注明是建议而非已选定语音设备。服务器、子域名、HTTPS 和假车手柄已完成初步验证；下一步接入灵矽会话、浏览器语音和车载网关；摄像板型号待确认。实车方案可比较 ESP32-CAM 主动连云并承担相机+局域网 UDP 桥接，或独立车载网关；必须明确动作的认证、单次时效/去重、急停、断线与本地看门狗，先卸弹、架空进行断线/延迟/重发验证，不向公网暴露当前无鉴权 UDP 4210 或 TCP 8266 管理口。摄像头预览与视觉模型推理是两条不同链路，当前网页只有触发拍照时展示照片，不是已实现连续视频。云后台的 `_start_console` 遇 stdin EOF 会置 `done` 而退出，也需改成适合无交互环境的运行方式。用户已授权配置子域名；公网目前仅为模拟原型，使用独立云端灵矽身份，未迁移电脑身份，也未验证实车。
+- **云方案验证（2026-10-30，模拟站点已实施）**：用户希望网页看画面、按键控车、可语音控车，处理位置不限。云站点已接入独立灵矽身份并握手，下一步请用户在当前已有控制者的手机网页验证麦克风、识别和回复；当前不抢占其连接。确认购买的摄像板和供电后，适配取图及云端预览/视觉；实车方案可比较 ESP32-CAM 主动连云并承担相机+局域网 UDP 桥接，或独立车载网关，固件及网关均未实现。必须明确动作的认证、单次时效/去重、急停、断线与本地看门狗，先卸弹、架空进行断线/延迟/重发验证，不向公网暴露当前无鉴权 UDP 4210 或 TCP 8266 管理口。摄像头预览与视觉模型推理是两条不同链路，云端模拟页面目前没有摄像头画面。公网目前仅为模拟原型，未迁移电脑身份，也未验证实车；云端语音不等于硬件端直连灵矽。
 
 - **协助首次烧录（2026-10-30，尚未实施）**：让用户先选定并确认购买的摄像头板/镜头/底座型号；收到设备后指导用户用数据线连接 Mac，核对新串口及具体板型，准备可编译的 CameraWebServer 或兼容 JPEG 快照程序，再由助手处理电脑端环境和烧录，必要时指导用户操作 BOOT/IO0 或 RESET；验证配网、静态 JPEG 及原项目 `camera-test`。不要将固件刷到现有 CyberBrick Core，也不要把摄像头固件写入 AI Passport。用户未要求助手自行购买，未有实物前不能假定刷机或兼容已成功。
 
@@ -127,9 +127,9 @@
 
 ## 已验证 / 未验证
 
-2026-10-30 用户确认已绑定云端灵矽设备；只读查看云服务日志，确认发生真实灵矽 WebSocket 握手，两个服务状态 active，尚未检查语音识别、TTS、真手机或实车。用户未购买摄像头，继续推荐低价套装。
+2026-10-30 用户确认已绑定云端灵矽设备；只读查看云服务日志，确认真实灵矽 WebSocket 握手成功，下行协商为 PCM、16 kHz、单声道、20 ms，云应用及 Nginx 状态 active。尝试用桌面浏览器模拟麦克风验证时发现网页已有控制者；未抢占或中断该连接，已询问用户在现有网页测试。真实语音识别、TTS、手机外放及实车尚未验证。用户未购买摄像头，继续推荐低价套装。
 
-2026-10-30 云端灵矽绑定准备：服务器已部署含浏览器语音的模拟版，从真实灵矽 OTA 收到独立设备的 6 位激活码；公网手机尺寸 Chrome 登录后可看到激活码，并通过 HTTPS 成功加载 AudioWorklet 脚本。云端设备身份文件和页面密码文件权限均为 600；没有迁移电脑设备身份。用户尚未绑定，未验证真实平台 WebSocket 会话、真实手机麦克风、语音识别、TTS、延迟、回声或实车。Cloudflare 权威 DNS、1.1.1.1、8.8.8.8 和服务器自身能查到新记录，但开发机当前 DNS 仍缓存 NXDOMAIN，2026-10-30 13:52 本机查询剩余约 886 秒；手机可先切换移动数据或等待缓存到期。本次公网 Chrome 验证使用了目标地址覆盖，不能证明开发机当前默认 DNS 已更新。
+2026-10-30 云端灵矽绑定准备（该时点的历史记录）：服务器已部署含浏览器语音的模拟版，从真实灵矽 OTA 收到独立设备的 6 位激活码；公网手机尺寸 Chrome 登录后可看到激活码，并通过 HTTPS 成功加载 AudioWorklet 脚本。云端设备身份文件和页面密码文件权限均为 600；没有迁移电脑设备身份。此时用户尚未绑定，其后绑定及握手结果见上条。Cloudflare 权威 DNS、1.1.1.1、8.8.8.8 和服务器自身能查到新记录，但开发机当时的 DNS 仍缓存 NXDOMAIN，2026-10-30 13:52 本机查询剩余约 886 秒；手机可先切换移动数据或等待缓存到期。本次公网 Chrome 验证使用了目标地址覆盖，不能证明开发机当时默认 DNS 已更新。
 
 2026-10-30 云端音频适配：`tests/test_cloud_audio.py tests/test_session.py tests/test_session_events.py tests/test_audio.py` **13 passed**；假灵矽平台验证静音/PCM 上行及 PCM 下行回调，另验证音频积压丢旧帧和拒绝不支持的 Opus。后续扩展后运行相关测试 **19 passed**，新增手机 WebSocket → 假平台音频往返测试；桌面 Chrome 的 390×844 视口用模拟麦克风向假平台发送了非静音 640 字节帧，并收到 TTS 文本及音频回调，验证回复 PCM 被加入浏览器播放队列（未验证物理扬声器）。用 Node 对 44.1kHz 和 48kHz 的 440Hz 正弦输入检查 16kHz、20ms 输出帧及静音。增加独立身份的 OTA 与加密地址检查后相关测试 **33 passed**；未验证真实手机采样及外放、真实灵矽、现场回声或设备，语音版已部署到云站点并从真实 OTA 获取激活码，尚待用户绑定。
 
