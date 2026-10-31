@@ -136,8 +136,10 @@ def test_build_via_tool_and_missing_target():
         register_blind_tools(mcp, nav)
         call = lambda name, args: mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",  # noqa: E731
                                               "params": {"name": name, "arguments": args}})
-        r = await call("self.blind.goto", {"target": "瓶子"})
-        assert r["result"]["isError"] and "拍一张" in r["result"]["content"][0]["text"]
+        r = await call("self.blind.goto", {"target": "瓶子"})  # 还没拍图：按口述摆放（正前方 50 厘米）走
+        assert r["result"]["isError"] is False and "没拍照" in r["result"]["content"][0]["text"]
+        await tank.stop()
+        nav.map = None
         nav.frame = None
         r = await call("self.blind.map", {})
         text = r["result"]["content"][0]["text"]
@@ -359,5 +361,35 @@ def test_ram_runs_backward_step():
         await tank.close()
         drives = [c[1:3] for c in be.calls if c[0] == "drive"]
         assert drives[-1] == (-BLIND_SPEED, -BLIND_SPEED)  # 最后一步是倒车
+
+    asyncio.run(main())
+
+
+def test_assumed_layout_without_photo():
+    """没拍照：说“绕纸杯一圈”按纸杯在车头正前方 50 厘米规划；说了距离按说的。"""
+    from linx_client.blind import assumed_map
+
+    m = assumed_map("纸杯", 40)
+    x, y, h = m.pose
+    (_, (x1, y1, x2, y2)), = m.obstacles
+    assert h == pytest.approx(math.pi / 2)  # 车头朝上
+    assert ((x1 + x2) / 2 - x, (y1 + y2) / 2 - y) == pytest.approx((0, 40), abs=0.5)  # 纸杯正前方 40cm
+
+    async def main():
+        be = MockBackend(verbose=False)
+        tank = TankExecutor(be, max_speed=100)
+        await tank.start()
+        nav = BlindNavigator(tank, None, cm_per_s=600)
+        mcp = McpServer()
+        register_blind_tools(mcp, nav, camera=False)
+        assert "self.blind.map" not in mcp.tools  # 没摄像头就不提供拍图
+        r = await mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+            "name": "self.blind.goto", "arguments": {"target": "纸杯", "where": "绕一圈"}}})
+        text = r["result"]["content"][0]["text"]
+        assert r["result"]["isError"] is False and "没拍照" in text and "50 厘米" in text
+        while tank.status()["mission"]:
+            await asyncio.sleep(0.02)
+        assert math.dist(nav.map.pose[:2], (150, 80)) < 3  # 绕一圈回到出发点（地图 y 朝上，车在下方 80cm 处）
+        await tank.close()
 
     asyncio.run(main())

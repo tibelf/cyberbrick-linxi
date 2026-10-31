@@ -226,7 +226,13 @@ async def _run(args):
     if args.blind_view_cm and not args.blind:
         print("⚠️  --blind-view-cm 只在加了 --blind（闭眼导航）时才有用，这次没开闭眼导航")
     if args.blind and not args.camera:
-        print("⚠️  --blind 要配合 --camera 才能拍俯拍图，这次没开闭眼导航")
+        from .blind import BlindNavigator
+        from .tools import register_blind_tools
+
+        # 没开摄像头：只能口述摆放（“纸杯在车头正前方 40 厘米”，不说按 50 厘米），不拍照
+        register_blind_tools(mcp, BlindNavigator(tank, None, say=lambda text: session.say(text),
+                                                 cm_per_s=args.blind_cm_per_s), camera=False)
+        print("🙈 闭眼导航（没开摄像头）：说“绕纸杯一圈/撞倒纸杯”，按纸杯在车头正前方 50 厘米算，也可以说出距离")
     photo = None
     if args.camera:
         from .camera import PhotoTool, make_camera
