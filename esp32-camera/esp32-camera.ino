@@ -28,13 +28,87 @@ static bool take_camera_lock() {
 static esp_err_t index_handler(httpd_req_t *req) {
   static const char page[] = R"HTML(<!doctype html><html lang="zh-CN"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>小车摄像头</title></head><body style="font-family:sans-serif;text-align:center">
-<h2>小车摄像头</h2><img id="view" style="max-width:100%" alt="摄像头画面">
-<p><a href="/capture">拍一张照片</a></p><script>
+<title>小车摄像头</title><style>
+body{font-family:system-ui,sans-serif;margin:16px auto;padding:0 16px;max-width:640px;color:#222}
+img{display:block;width:100%;background:#eee;border-radius:8px}label{display:flex;align-items:center;
+justify-content:space-between;gap:16px;margin:16px 0}select,input{font-size:16px}#message{color:#555}
+</style></head><body><h2>小车摄像头</h2><img id="view" alt="摄像头画面">
+<p><a href="/capture">拍一张照片</a></p>
+<label>白平衡<select id="wb_mode"><option value="0">自动</option><option value="1">晴天</option>
+<option value="2">阴天</option><option value="3">办公室</option><option value="4">室内暖光</option></select></label>
+<label>亮度<input id="brightness" type="range" min="-2" max="2" step="1"></label>
+<label>饱和度<input id="saturation" type="range" min="-2" max="2" step="1"></label>
+<label>水平镜像<input id="hmirror" type="checkbox"></label>
+<label>上下翻转<input id="vflip" type="checkbox"></label>
+<p id="message">调整会立即生效，重启后恢复默认。</p><script>
 document.getElementById('view').src='http://'+location.hostname+':81/stream';
+const ids=['wb_mode','brightness','saturation','hmirror','vflip'];
+fetch('/settings').then(r=>{if(!r.ok)throw Error();return r.json()}).then(s=>ids.forEach(id=>{
+ const el=document.getElementById(id);if(el.type==='checkbox')el.checked=!!s[id];else el.value=s[id];
+})).catch(()=>document.getElementById('message').textContent='暂时无法读取设置，请刷新页面。');
+ids.forEach(id=>document.getElementById(id).addEventListener('change',async e=>{
+ const el=e.target, value=el.type==='checkbox'?(el.checked?1:0):el.value;
+ try{const r=await fetch('/control?var='+encodeURIComponent(id)+'&val='+encodeURIComponent(value));
+ if(!r.ok)throw Error();document.getElementById('message').textContent='已调整，重启后恢复默认。';}
+ catch(err){document.getElementById('message').textContent='调整失败，请重试。';}
+}));
 </script></body></html>)HTML";
   httpd_resp_set_type(req, "text/html; charset=utf-8");
   return httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t settings_handler(httpd_req_t *req) {
+  if (!take_camera_lock()) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    return httpd_resp_sendstr(req, "camera unavailable");
+  }
+  sensor_t *sensor = esp_camera_sensor_get();
+  char result[160];
+  if (sensor) {
+    snprintf(result, sizeof(result),
+             "{\"wb_mode\":%u,\"brightness\":%d,\"saturation\":%d,\"hmirror\":%u,\"vflip\":%u}",
+             sensor->status.wb_mode, sensor->status.brightness, sensor->status.saturation,
+             sensor->status.hmirror, sensor->status.vflip);
+  }
+  xSemaphoreGive(camera_lock);
+  if (!sensor) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "sensor unavailable");
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  return httpd_resp_sendstr(req, result);
+}
+
+static esp_err_t control_handler(httpd_req_t *req) {
+  char query[96], variable[24], value_text[12];
+  if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+      httpd_query_key_value(query, "var", variable, sizeof(variable)) != ESP_OK ||
+      httpd_query_key_value(query, "val", value_text, sizeof(value_text)) != ESP_OK) {
+    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "missing parameter");
+  }
+  char *end = nullptr;
+  long value = strtol(value_text, &end, 10);
+  if (!end || end == value_text || *end != '\0')
+    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid value");
+  bool allowed = (!strcmp(variable, "wb_mode") && value >= 0 && value <= 4) ||
+                 ((!strcmp(variable, "brightness") || !strcmp(variable, "saturation")) && value >= -2 && value <= 2) ||
+                 ((!strcmp(variable, "hmirror") || !strcmp(variable, "vflip")) && (value == 0 || value == 1));
+  if (!allowed) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unsupported setting");
+  if (!take_camera_lock()) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    return httpd_resp_sendstr(req, "camera unavailable");
+  }
+  sensor_t *sensor = esp_camera_sensor_get();
+  int result = -1;
+  if (sensor) {
+    if (!strcmp(variable, "wb_mode")) result = sensor->set_wb_mode(sensor, value);
+    else if (!strcmp(variable, "brightness")) result = sensor->set_brightness(sensor, value);
+    else if (!strcmp(variable, "saturation")) result = sensor->set_saturation(sensor, value);
+    else if (!strcmp(variable, "hmirror")) result = sensor->set_hmirror(sensor, value);
+    else if (!strcmp(variable, "vflip")) result = sensor->set_vflip(sensor, value);
+  }
+  xSemaphoreGive(camera_lock);
+  if (result != 0) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "setting failed");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  return httpd_resp_sendstr(req, "OK");
 }
 
 static esp_err_t capture_handler(httpd_req_t *req) {
@@ -90,8 +164,12 @@ static void start_servers() {
     if (httpd_start(&image_server, &config) == ESP_OK) {
       const httpd_uri_t index = { .uri = "/", .method = HTTP_GET, .handler = index_handler, .user_ctx = nullptr };
       const httpd_uri_t capture = { .uri = "/capture", .method = HTTP_GET, .handler = capture_handler, .user_ctx = nullptr };
+      const httpd_uri_t settings = { .uri = "/settings", .method = HTTP_GET, .handler = settings_handler, .user_ctx = nullptr };
+      const httpd_uri_t control = { .uri = "/control", .method = HTTP_GET, .handler = control_handler, .user_ctx = nullptr };
       httpd_register_uri_handler(image_server, &index);
       httpd_register_uri_handler(image_server, &capture);
+      httpd_register_uri_handler(image_server, &settings);
+      httpd_register_uri_handler(image_server, &control);
     }
   }
   if (!stream_server) {
