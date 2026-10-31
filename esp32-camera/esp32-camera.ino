@@ -40,7 +40,7 @@ justify-content:space-between;gap:16px;margin:16px 0}select,input{font-size:16px
 <label>饱和度<input id="saturation" type="range" min="-2" max="2" step="1"></label>
 <label>水平镜像<input id="hmirror" type="checkbox"></label>
 <label>上下翻转<input id="vflip" type="checkbox"></label>
-<p id="message">调整会立即生效，重启后恢复默认。</p><script>
+<p id="message">调整会立即生效并保存到摄像头。</p><script>
 document.getElementById('view').src='http://'+location.hostname+':81/stream';
 const ids=['wb_mode','brightness','saturation','hmirror','vflip'];
 fetch('/settings').then(r=>{if(!r.ok)throw Error();return r.json()}).then(s=>ids.forEach(id=>{
@@ -49,8 +49,8 @@ fetch('/settings').then(r=>{if(!r.ok)throw Error();return r.json()}).then(s=>ids
 ids.forEach(id=>document.getElementById(id).addEventListener('change',async e=>{
  const el=e.target, value=el.type==='checkbox'?(el.checked?1:0):el.value;
  try{const r=await fetch('/control?var='+encodeURIComponent(id)+'&val='+encodeURIComponent(value));
- if(!r.ok)throw Error();document.getElementById('message').textContent='已调整，重启后恢复默认。';}
- catch(err){document.getElementById('message').textContent='调整失败，请重试。';}
+ if(!r.ok)throw Error();document.getElementById('message').textContent='已调整并保存。';}
+ catch(err){document.getElementById('message').textContent='调整或保存失败，请重试。';}
 }));
 </script></body></html>)HTML";
   httpd_resp_set_type(req, "text/html; charset=utf-8");
@@ -77,6 +77,35 @@ static esp_err_t settings_handler(httpd_req_t *req) {
   return httpd_resp_sendstr(req, result);
 }
 
+static bool supported_setting(const char *variable, long value) {
+  return (!strcmp(variable, "wb_mode") && value >= 0 && value <= 4) ||
+         ((!strcmp(variable, "brightness") || !strcmp(variable, "saturation")) && value >= -2 && value <= 2) ||
+         ((!strcmp(variable, "hmirror") || !strcmp(variable, "vflip")) && (value == 0 || value == 1));
+}
+
+static int apply_setting(sensor_t *sensor, const char *variable, int value) {
+  if (!strcmp(variable, "wb_mode")) return sensor->set_wb_mode(sensor, value);
+  if (!strcmp(variable, "brightness")) return sensor->set_brightness(sensor, value);
+  if (!strcmp(variable, "saturation")) return sensor->set_saturation(sensor, value);
+  if (!strcmp(variable, "hmirror")) return sensor->set_hmirror(sensor, value);
+  if (!strcmp(variable, "vflip")) return sensor->set_vflip(sensor, value);
+  return -1;
+}
+
+static void restore_image_settings() {
+  sensor_t *sensor = camera_ready ? esp_camera_sensor_get() : nullptr;
+  if (!sensor) return;
+  Preferences prefs;
+  if (!prefs.begin("camera-img", true)) return;
+  const char *names[] = {"wb_mode", "brightness", "saturation", "hmirror", "vflip"};
+  for (const char *name : names) {
+    if (!prefs.isKey(name)) continue;
+    int value = prefs.getInt(name);
+    if (supported_setting(name, value)) apply_setting(sensor, name, value);
+  }
+  prefs.end();
+}
+
 static esp_err_t control_handler(httpd_req_t *req) {
   char query[96], variable[24], value_text[12];
   if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
@@ -88,25 +117,22 @@ static esp_err_t control_handler(httpd_req_t *req) {
   long value = strtol(value_text, &end, 10);
   if (!end || end == value_text || *end != '\0')
     return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid value");
-  bool allowed = (!strcmp(variable, "wb_mode") && value >= 0 && value <= 4) ||
-                 ((!strcmp(variable, "brightness") || !strcmp(variable, "saturation")) && value >= -2 && value <= 2) ||
-                 ((!strcmp(variable, "hmirror") || !strcmp(variable, "vflip")) && (value == 0 || value == 1));
-  if (!allowed) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unsupported setting");
+  if (!supported_setting(variable, value)) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unsupported setting");
   if (!take_camera_lock()) {
     httpd_resp_set_status(req, "503 Service Unavailable");
     return httpd_resp_sendstr(req, "camera unavailable");
   }
   sensor_t *sensor = esp_camera_sensor_get();
-  int result = -1;
-  if (sensor) {
-    if (!strcmp(variable, "wb_mode")) result = sensor->set_wb_mode(sensor, value);
-    else if (!strcmp(variable, "brightness")) result = sensor->set_brightness(sensor, value);
-    else if (!strcmp(variable, "saturation")) result = sensor->set_saturation(sensor, value);
-    else if (!strcmp(variable, "hmirror")) result = sensor->set_hmirror(sensor, value);
-    else if (!strcmp(variable, "vflip")) result = sensor->set_vflip(sensor, value);
-  }
+  int result = sensor ? apply_setting(sensor, variable, value) : -1;
   xSemaphoreGive(camera_lock);
   if (result != 0) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "setting failed");
+  Preferences prefs;
+  bool saved = false;
+  if (prefs.begin("camera-img", false)) {
+    saved = prefs.putInt(variable, value) == sizeof(int32_t);
+    prefs.end();
+  }
+  if (!saved) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "setting applied but save failed");
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
   return httpd_resp_sendstr(req, "OK");
 }
@@ -289,6 +315,7 @@ void setup() {
   digitalWrite(FLASH_LED_PIN, LOW);
   camera_lock = xSemaphoreCreateMutex();
   camera_ready = camera_lock && setup_camera();
+  restore_image_settings();
   WiFi.persistent(false);
   WiFi.setAutoReconnect(true);
   Preferences prefs;
