@@ -172,6 +172,33 @@ class CloudDemo:
         sender = None
         leases = None
         watchdog = None
+        manual_task = None
+        pending_manual = None
+
+        async def run_manual():
+            """只保留最新摇杆值，避免慢网络把旧方向排队到松手之后。"""
+            nonlocal pending_manual
+            while pending_manual is not None:
+                left, right, lease, received = pending_manual
+                pending_manual = None
+                if (time.monotonic() - received >= 0.4
+                        or (self.gateway and (not self._valid_lease(lease) or not self.controller_authorized()))):
+                    continue
+                try:
+                    await self.tank.manual(left, right)
+                except asyncio.CancelledError:
+                    raise
+                except (ValueError, RuntimeError, OSError) as exc:
+                    self.publish({"type": "error", "message": str(exc)})
+
+        async def cancel_manual():
+            nonlocal manual_task, pending_manual
+            pending_manual = None
+            if manual_task and not manual_task.done():
+                manual_task.cancel()
+                await asyncio.gather(manual_task, return_exceptions=True)
+            manual_task = None
+
         try:
             try:
                 raw = await asyncio.wait_for(ws.recv(), AUTH_TIMEOUT_S)
@@ -216,6 +243,7 @@ class CloudDemo:
                     if not isinstance(cmd, dict):
                         raise ValueError("指令格式错误")
                     if cmd.get("type") == "stop":
+                        await cancel_manual()
                         if self._armed:
                             self._set_armed(False)
                         await self.tank.stop()
@@ -223,15 +251,29 @@ class CloudDemo:
                         if not self._valid_lease(cmd.get("lease")):
                             raise ValueError("控制连接已过期")
                         self._last_presence = time.monotonic()
-                    elif cmd.get("type") == "drive":
+                    elif cmd.get("type") in ("drive", "pad"):
                         if self.gateway and not self._valid_lease(cmd.get("lease")):
                             raise ValueError("控制指令已过期，请重试")
-                        direction = cmd.get("direction")
-                        values = {"forward": (80, 80), "backward": (-80, -80),
-                                  "left": (-80, 80), "right": (80, -80)}
-                        if direction not in values:
-                            raise ValueError("未知方向")
-                        await self.tank.manual(*values[direction])
+                        if cmd["type"] == "drive":
+                            values = {"forward": (80, 80), "backward": (-80, -80),
+                                      "left": (-80, 80), "right": (80, -80)}
+                            direction = cmd.get("direction")
+                            if not isinstance(direction, str) or direction not in values:
+                                raise ValueError("未知方向")
+                            left, right = values[direction]
+                        else:
+                            left, right = cmd.get("l"), cmd.get("r")
+                            if not all(type(v) is int and -100 <= v <= 100 for v in (left, right)):
+                                raise ValueError("摇杆力度必须是 -100 到 100 的整数")
+                        if not left and not right:
+                            await cancel_manual()
+                            if self._armed:
+                                self._set_armed(False)
+                            await self.tank.stop()
+                        else:
+                            pending_manual = (left, right, cmd.get("lease"), time.monotonic())
+                            if manual_task is None or manual_task.done():
+                                manual_task = asyncio.create_task(run_manual())
                     elif cmd.get("type") in ("barrel", "fire_arm", "fire"):
                         kind = cmd["type"]
                         # 锁定和急停一样始终可以执行；其他操作必须来自新鲜网页。
@@ -242,6 +284,7 @@ class CloudDemo:
                             direction = cmd.get("direction")
                             if direction not in ("up", "down"):
                                 raise ValueError("炮台方向无效")
+                            await cancel_manual()
                             await self.tank.stop()
                             result = self.tank.barrel(direction, 200)
                             self.publish({"type": "action_result", "action": kind, "message": result})
@@ -253,6 +296,7 @@ class CloudDemo:
                                 raise PermissionError(self.fire_status()["reason"])
                             self._set_armed(on)
                             if not on:
+                                await cancel_manual()
                                 await self.tank.stop()
                         else:
                             if not self.fire_authorized():
@@ -260,6 +304,7 @@ class CloudDemo:
                             now = time.monotonic()
                             if self.tank.busy or now < self._next_shot_at:
                                 raise RuntimeError("小车正在执行动作或发射冷却中，请稍后再试")
+                            await cancel_manual()
                             await self.tank.stop()
                             result = self.tank.fire(1)
                             cooldown_ms = self.tank.fire_pulse_ms + int(self.tank.fire_cooldown_s * 1000)
@@ -279,6 +324,7 @@ class CloudDemo:
         finally:
             if owner:
                 try:
+                    await cancel_manual()
                     if self.session:
                         self.session.mic_enabled = False
                     self._last_presence = 0.0

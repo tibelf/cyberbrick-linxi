@@ -202,3 +202,109 @@ def test_barrel_single_shot_lock_cooldown_and_new_controller():
             await tank.close()
 
     asyncio.run(run())
+
+
+def test_analog_pad_requires_fresh_lease_and_obeys_speed_limit():
+    async def run():
+        backend = MockBackend(verbose=False)
+        tank = TankExecutor(backend, max_speed=40, fire_enabled=False)
+        gateway = type("OnlineGateway", (), {"online": True, "fire_supported": True})()
+        demo = CloudDemo(tank, "a" * 40, gateway, fire_allowed=True)
+        port = _free_port()
+        await tank.start()
+        await demo.start(port)
+        lease = None
+
+        async def receive(ws, kind):
+            nonlocal lease
+            async with asyncio.timeout(2):
+                while True:
+                    msg = json.loads(await ws.recv())
+                    if msg["type"] == "lease":
+                        lease = msg["id"]
+                        await ws.send(json.dumps({"type": "presence", "lease": lease}))
+                    if msg["type"] == kind:
+                        return msg
+
+        try:
+            async with connect(f"ws://127.0.0.1:{port}/control", origin=f"http://127.0.0.1:{port}") as ws:
+                await ws.send(json.dumps({"type": "auth", "token": "a" * 40}))
+                await receive(ws, "ready")
+                await receive(ws, "lease")
+                await ws.send(json.dumps({"type": "pad", "lease": "expired", "l": 30, "r": 30}))
+                assert "过期" in (await receive(ws, "error"))["message"]
+                for invalid in (True, 1.5, "40", 101, -101, None):
+                    await ws.send(json.dumps({"type": "pad", "lease": lease, "l": invalid, "r": 0}))
+                    assert "整数" in (await receive(ws, "error"))["message"]
+                assert not any(c[0] == "drive" for c in backend.calls)
+                await ws.send(json.dumps({"type": "pad", "lease": lease, "l": 30, "r": -12}))
+                await _wait_for(lambda: ("drive", 30, -12, 400) in backend.calls)
+                await ws.send(json.dumps({"type": "pad", "lease": lease, "l": 100, "r": -100}))
+                await _wait_for(lambda: ("drive", 40, -40, 400) in backend.calls)
+                await ws.send(json.dumps({"type": "fire_arm", "lease": lease, "on": True}))
+                assert (await receive(ws, "fire_state"))["armed"]
+                await ws.send(json.dumps({"type": "pad", "lease": lease, "l": 0, "r": 0}))
+                assert not (await receive(ws, "fire_state"))["armed"]
+                await _wait_for(lambda: backend.calls[-1] == ("halt",))
+        finally:
+            demo.server.close()
+            await demo.server.wait_closed()
+            await tank.close()
+
+    asyncio.run(run())
+
+
+def test_slow_car_coalesces_analog_commands_and_stop_discards_pending():
+    class SlowBackend(MockBackend):
+        def __init__(self):
+            super().__init__(verbose=False)
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def drive(self, left, right, failsafe_ms):
+            self.started.set()
+            await self.release.wait()
+            await super().drive(left, right, failsafe_ms)
+
+    async def run():
+        backend = SlowBackend()
+        tank = TankExecutor(backend, max_speed=40, fire_enabled=False)
+        gateway = type("OnlineGateway", (), {"online": True, "fire_supported": True})()
+        demo = CloudDemo(tank, "a" * 40, gateway)
+        port = _free_port()
+        await tank.start()
+        await demo.start(port)
+        try:
+            async with connect(f"ws://127.0.0.1:{port}/control", origin=f"http://127.0.0.1:{port}") as ws:
+                await ws.send(json.dumps({"type": "auth", "token": "a" * 40}))
+                assert json.loads(await ws.recv())["type"] == "ready"
+                lease = json.loads(await ws.recv())["id"]
+                await ws.send(json.dumps({"type": "pad", "lease": lease, "l": 25, "r": 25}))
+                await asyncio.wait_for(backend.started.wait(), 1)
+                previous = demo._last_presence
+                for left in (26, 32, 38):
+                    await ws.send(json.dumps({"type": "pad", "lease": lease, "l": left, "r": -10}))
+                await ws.send(json.dumps({"type": "presence", "lease": lease}))
+                await _wait_for(lambda: demo._last_presence > previous)
+                backend.release.set()
+                await _wait_for(lambda: ("drive", 38, -10, 400) in backend.calls)
+                assert ("drive", 26, -10, 400) not in backend.calls
+                assert ("drive", 32, -10, 400) not in backend.calls
+
+                backend.release.clear()
+                backend.started.clear()
+                await ws.send(json.dumps({"type": "pad", "lease": lease, "l": -20, "r": -20}))
+                await asyncio.wait_for(backend.started.wait(), 1)
+                await ws.send(json.dumps({"type": "pad", "lease": lease, "l": 40, "r": 40}))
+                await ws.send(json.dumps({"type": "stop"}))
+                await _wait_for(lambda: backend.calls[-1] == ("halt",))
+                stop_at = len(backend.calls)
+                backend.release.set()
+                await asyncio.sleep(0.1)
+                assert not any(c[0] == "drive" for c in backend.calls[stop_at:])
+        finally:
+            demo.server.close()
+            await demo.server.wait_closed()
+            await tank.close()
+
+    asyncio.run(run())
