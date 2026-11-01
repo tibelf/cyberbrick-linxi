@@ -7,8 +7,9 @@ import urllib.request
 
 import pytest
 from websockets.asyncio.client import connect
-from websockets.exceptions import ConnectionClosedError, InvalidStatus
+from websockets.exceptions import ConnectionClosed, ConnectionClosedError, InvalidStatus
 
+import linx_client.cloud_demo as cloud_demo
 from linx_client.cloud_demo import CloudDemo
 from linx_client.tank import MockBackend, TankExecutor
 
@@ -104,6 +105,34 @@ def test_proxy_origin_requires_https_and_is_explicit():
             async with connect(url, origin="https://car.example") as ws:
                 await ws.send(json.dumps({"type": "auth", "token": token}))
                 assert json.loads(await ws.recv())["type"] == "ready"
+        finally:
+            demo.server.close()
+            await demo.server.wait_closed()
+            await tank.close()
+
+    asyncio.run(run())
+
+
+def test_real_controller_without_presence_is_disconnected_and_stopped(monkeypatch):
+    monkeypatch.setattr(cloud_demo, "CONTROLLER_TIMEOUT_S", 0.15)
+
+    async def run():
+        port = _free_port()
+        backend = MockBackend(verbose=False)
+        tank = TankExecutor(backend, max_speed=40, fire_enabled=False)
+        gateway = type("OnlineGateway", (), {"online": True})()
+        demo = CloudDemo(tank, "a" * 40, gateway)
+        await tank.start()
+        await demo.start(port)
+        try:
+            async with connect(f"ws://127.0.0.1:{port}/control", origin=f"http://127.0.0.1:{port}") as ws:
+                await ws.send(json.dumps({"type": "auth", "token": "a" * 40}))
+                assert json.loads(await ws.recv())["mode"] == "真实小车"
+                with pytest.raises(ConnectionClosed):
+                    async with asyncio.timeout(2):
+                        while True:
+                            await ws.recv()  # 不回应租约，模拟网页离线
+            await _wait_for(lambda: backend.calls[-1] == ("halt",))
         finally:
             demo.server.close()
             await demo.server.wait_closed()

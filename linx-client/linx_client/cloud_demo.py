@@ -1,10 +1,12 @@
-"""仅供本机或 SSH 隧道测试的云控车原型，只能连接模拟小车。"""
+"""云控车入口；默认模拟，可显式启用受保护的实车连接。"""
 
 import argparse
 import asyncio
 import json
 import os
 import secrets
+import time
+from collections import deque
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -18,12 +20,15 @@ from .tank import MockBackend, TankExecutor
 PAGE = Path(__file__).with_name("web") / "cloud-demo.html"
 WORKLET = Path(__file__).with_name("web") / "microphone-worklet.js"
 AUTH_TIMEOUT_S = 5
+LEASE_INTERVAL_S = 0.4
+LEASE_MAX_AGE_S = 0.9
+CONTROLLER_TIMEOUT_S = 1.5
 
 
 class CloudDemo:
-    """网页和动作测试入口。只监听回环地址，不能连接实车或发射。"""
+    """网页和动作入口。只监听回环地址；实车模式中发射始终锁定。"""
 
-    def __init__(self, tank: TankExecutor, token: str):
+    def __init__(self, tank: TankExecutor, token: str, gateway=None):
         if len(token) < 32:
             raise ValueError("请设置至少 32 个字符的随机 CAR_DEMO_TOKEN")
         self.tank = tank
@@ -34,6 +39,35 @@ class CloudDemo:
         self.audio_format = None
         self.activation_code = None
         self.linx_state = "offline"
+        self.gateway = gateway
+        self._leases = deque(maxlen=4)
+        self._last_presence = 0.0
+
+    def controller_authorized(self):
+        return self._controller is not None and time.monotonic() - self._last_presence < CONTROLLER_TIMEOUT_S
+
+    def on_car_status(self, online):
+        self.publish({"type": "car_status", "online": online})
+
+    def _valid_lease(self, value):
+        return isinstance(value, str) and any(
+            secrets.compare_digest(value, token) and time.monotonic() - issued < LEASE_MAX_AGE_S
+            for token, issued in self._leases
+        )
+
+    async def _lease_loop(self):
+        while True:
+            token = secrets.token_hex(8)
+            self._leases.append((token, time.monotonic()))
+            self.publish({"type": "lease", "id": token})
+            await asyncio.sleep(LEASE_INTERVAL_S)
+
+    async def _controller_watchdog(self, ws):
+        while True:
+            await asyncio.sleep(0.2)
+            if not self.controller_authorized():
+                await ws.close(code=4008, reason="控制连接超时")
+                return
 
     @staticmethod
     def _http(connection, request):
@@ -108,6 +142,8 @@ class CloudDemo:
     async def _handle(self, ws):
         owner = False
         sender = None
+        leases = None
+        watchdog = None
         try:
             try:
                 raw = await asyncio.wait_for(ws.recv(), AUTH_TIMEOUT_S)
@@ -125,10 +161,17 @@ class CloudDemo:
                 return
             self._controller = ws
             self._outgoing = asyncio.Queue(maxsize=128)
+            self._leases.clear()
+            self._last_presence = time.monotonic()
             owner = True
-            await ws.send(json.dumps({"type": "ready", "mode": "模拟小车", "linx": self.linx_state},
+            mode = "真实小车" if self.gateway else "模拟小车"
+            await ws.send(json.dumps({"type": "ready", "mode": mode, "linx": self.linx_state,
+                                      "car_online": self.gateway.online if self.gateway else True},
                                      ensure_ascii=False))
             sender = asyncio.create_task(self._send_loop(ws, self._outgoing))
+            if self.gateway:
+                leases = asyncio.create_task(self._lease_loop())
+                watchdog = asyncio.create_task(self._controller_watchdog(ws))
             if self.activation_code:
                 self.publish({"type": "activation", "code": self.activation_code})
             if self.audio_format:
@@ -145,7 +188,13 @@ class CloudDemo:
                         raise ValueError("指令格式错误")
                     if cmd.get("type") == "stop":
                         await self.tank.stop()
+                    elif cmd.get("type") == "presence" and self.gateway:
+                        if not self._valid_lease(cmd.get("lease")):
+                            raise ValueError("控制连接已过期")
+                        self._last_presence = time.monotonic()
                     elif cmd.get("type") == "drive":
+                        if self.gateway and not self._valid_lease(cmd.get("lease")):
+                            raise ValueError("控制指令已过期，请重试")
                         direction = cmd.get("direction")
                         values = {"forward": (80, 80), "backward": (-80, -80),
                                   "left": (-80, 80), "right": (80, -80)}
@@ -158,7 +207,7 @@ class CloudDemo:
                         self.session.mic_enabled = cmd["on"]
                     else:
                         raise ValueError("未知指令")
-                except (ValueError, TypeError, RuntimeError) as exc:
+                except (ValueError, TypeError, RuntimeError, OSError) as exc:
                     self.publish({"type": "error", "message": str(exc)})
         except ConnectionClosed:
             pass
@@ -167,25 +216,41 @@ class CloudDemo:
                 try:
                     if self.session:
                         self.session.mic_enabled = False
+                    self._last_presence = 0.0
                     await self.tank.stop()
                 finally:
                     self._outgoing = None
                     self._controller = None
-                    if sender:
-                        sender.cancel()
-                        try:
-                            await sender
-                        except (asyncio.CancelledError, ConnectionClosed):
-                            pass
+                    for task in (sender, leases, watchdog):
+                        if task:
+                            task.cancel()
+                    await asyncio.gather(*(task for task in (sender, leases, watchdog) if task),
+                                         return_exceptions=True)
 
 
-async def _run(port: int, token: str, https_origin: str | None = None, linx_state: str | None = None):
-    # 这里固定模拟后端，避免误接真实车辆；发射始终关闭。
-    tank = TankExecutor(MockBackend(), max_speed=40, fire_enabled=False)
-    demo = CloudDemo(tank, token)
+async def _run(port: int, token: str, https_origin: str | None = None, linx_state: str | None = None,
+               real_car: bool = False, car_port: int = 18767):
+    gateway = None
+    if real_car:
+        from .cloud_car import CloudCarBackend, CloudCarGateway
+
+        gateway = CloudCarGateway(os.environ.get("CAR_DEVICE_TOKEN", ""))
+        owner = {}
+        backend = CloudCarBackend(gateway, lambda: owner["demo"].controller_authorized())
+    else:
+        backend = MockBackend()
+    tank = TankExecutor(backend, max_speed=40, fire_enabled=False)
+    demo = CloudDemo(tank, token, gateway)
+    if gateway:
+        owner["demo"] = demo
+        gateway.on_status = demo.on_car_status
+        gateway.on_disconnect = lambda: asyncio.create_task(tank.stop())
+    tank.on_error = lambda message: demo.publish({"type": "error", "message": message})
     await tank.start()
     runner = None
     try:
+        if gateway:
+            await gateway.start(car_port)
         if linx_state:
             from .cloud_audio import BrowserLinxSession
             from .cloud_linx import make_cloud_endpoint
@@ -201,10 +266,9 @@ async def _run(port: int, token: str, https_origin: str | None = None, linx_stat
             demo.session = BrowserLinxSession(ident, mcp, endpoint, on_pcm=demo.publish,
                                              on_format=demo.on_audio_format, on_flush=demo.on_audio_flush,
                                              on_event=demo.on_linx_event)
-            tank.on_error = lambda message: demo.publish({"type": "error", "message": message})
             runner = asyncio.create_task(demo.session.run_forever())
         await demo.start(port, https_origin)
-        print(f"模拟控制台监听 127.0.0.1:{port}（只能通过本机、SSH 隧道或受保护的 HTTPS 代理访问）")
+        print(f"云端控制台监听 127.0.0.1:{port}（{'真实小车，发射锁定' if gateway else '模拟小车'}）")
         async with demo.server:
             await asyncio.Future()  # 不依赖 stdin，适合无交互测试
     finally:
@@ -214,21 +278,28 @@ async def _run(port: int, token: str, https_origin: str | None = None, linx_stat
             runner.cancel()
             await asyncio.gather(runner, return_exceptions=True)
         await tank.close()
+        if gateway and gateway.server:
+            gateway.server.close()
+            await gateway.server.wait_closed()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="仅监听本机的模拟云控车原型")
+    parser = argparse.ArgumentParser(description="仅监听本机的云控车入口")
     parser.add_argument("--port", type=int, default=18765, help="本机监听端口（默认 18765）")
     parser.add_argument("--https-origin", help="可选的 HTTPS 代理来源；需另外配置鉴权及限流")
-    parser.add_argument("--linx-state", help="可选的独立灵矽设备身份文件（仅支持模拟车）")
+    parser.add_argument("--linx-state", help="可选的独立灵矽设备身份文件")
+    parser.add_argument("--real-car", action="store_true", help="启用实车直连；需配置 CAR_DEVICE_TOKEN，发射仍锁定")
+    parser.add_argument("--car-port", type=int, default=18767, help="车端连接监听端口（仅回环）")
     args = parser.parse_args()
     token = os.environ.get("CAR_DEMO_TOKEN", "")
     if len(token) < 32:
         parser.error("请通过 CAR_DEMO_TOKEN 环境变量设置至少 32 个字符的随机密码")
+    if args.real_car and len(os.environ.get("CAR_DEVICE_TOKEN", "")) < 32:
+        parser.error("实车模式需要通过 CAR_DEVICE_TOKEN 设置至少 32 个字符的随机密码")
     try:
-        asyncio.run(_run(args.port, token, args.https_origin, args.linx_state))
+        asyncio.run(_run(args.port, token, args.https_origin, args.linx_state, args.real_car, args.car_port))
     except KeyboardInterrupt:
-        print("模拟控制台已停止")
+        print("云端控制台已停止")
 
 
 if __name__ == "__main__":

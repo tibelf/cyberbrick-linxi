@@ -22,7 +22,7 @@
 <body>
 <main>
   <h1>小车云端控制测试</h1>
-  <p>模拟模式：不会连接实车或发射。</p>
+  <p id="mode">模拟模式：不会连接实车或发射。</p>
   <section>
     <form id="login">
       <label for="token">控制密码</label>
@@ -47,7 +47,7 @@
   </section>
 </main>
 <script>
-  let ws, timer, activePointer;
+  let ws, timer, activePointer, controlLease, realMode = false, carOnline = true;
   let audioContext, stream, worklet, audioFormat, talkingPointer, playbackEnd = 0;
   const playing = new Set();
   const status = document.querySelector('#status');
@@ -143,7 +143,21 @@
     ws.onmessage = event => {
       if (event.data instanceof ArrayBuffer) { playAudio(event.data); return; }
       const message = JSON.parse(event.data);
-      if (message.type === 'ready') { status.textContent = '已连接：模拟小车'; enable(true); }
+      if (message.type === 'ready') {
+        realMode = message.mode === '真实小车'; carOnline = message.car_online !== false;
+        document.querySelector('#mode').textContent = realMode ? '实车模式：发射已锁定。' : '模拟模式：不会连接实车或发射。';
+        status.textContent = realMode ? (carOnline ? '已连接：真实小车在线' : '已连接：等待小车上线') : '已连接：模拟小车';
+        enable(carOnline);
+      }
+      if (message.type === 'lease') {
+        controlLease = message.id;
+        if (!document.hidden) send({type: 'presence', lease: controlLease});
+      }
+      if (message.type === 'car_status') {
+        carOnline = message.online === true;
+        status.textContent = carOnline ? '已连接：真实小车在线' : '小车已离线';
+        enable(carOnline);
+      }
       if (message.type === 'audio_format') {
         audioFormat = message; enableAudio.disabled = !!audioContext;
         voiceStatus.textContent = audioContext ? '语音已启用，按住说话' : '灵矽已连接，可以启用语音';
@@ -159,13 +173,13 @@
       }
       if (message.type === 'error') status.textContent = message.message;
     };
-    ws.onclose = event => { clearInterval(timer); timer = null; activePointer = null; enable(false); closeAudio(); voiceStatus.textContent = '灵矽语音尚未接入'; status.textContent = event.reason || '连接已断开'; };
+    ws.onclose = event => { clearInterval(timer); timer = null; activePointer = controlLease = null; enable(false); closeAudio(); voiceStatus.textContent = '灵矽语音尚未接入'; status.textContent = event.reason || '连接已断开'; };
   });
   document.querySelectorAll('[data-direction]').forEach(button => {
     button.addEventListener('pointerdown', event => {
       if (activePointer != null) return;
       event.preventDefault(); activePointer = event.pointerId; button.setPointerCapture(event.pointerId);
-      const move = () => send({type: 'drive', direction: button.dataset.direction});
+      const move = () => send({type: 'drive', direction: button.dataset.direction, lease: controlLease});
       move(); timer = setInterval(move, 120);
     });
     ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(name => button.addEventListener(name, event => {

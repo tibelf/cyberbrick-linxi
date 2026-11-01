@@ -2,12 +2,15 @@
 
 import asyncio
 import json
+import socket
 
 import pytest
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosedError
 
 from linx_client.cloud_car import CloudCarBackend, CloudCarGateway, COMMAND_AGE_S
+from linx_client.cloud_demo import CloudDemo
+from linx_client.tank import TankExecutor
 
 
 async def _open_gateway():
@@ -143,5 +146,51 @@ def test_device_must_ack_and_controller_must_be_authorized():
                     await pending
         finally:
             await _close(gateway)
+
+    asyncio.run(run())
+
+
+def test_real_control_requires_fresh_page_and_stop_reaches_device():
+    async def run():
+        gateway, url = await _open_gateway()
+        owner = {}
+        tank = TankExecutor(CloudCarBackend(gateway, lambda: owner["demo"].controller_authorized()),
+                            max_speed=40, fire_enabled=False)
+        demo = CloudDemo(tank, "b" * 40, gateway)
+        owner["demo"] = demo
+        await tank.start()
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        await demo.start(port)
+        origin = f"http://127.0.0.1:{port}"
+        try:
+            async with connect(url) as device:
+                await _auth(device)
+                await _poll(device, 1)
+                async with connect(f"ws://127.0.0.1:{port}/control", origin=origin) as browser:
+                    await browser.send(json.dumps({"type": "auth", "token": "b" * 40}))
+                    ready = json.loads(await browser.recv())
+                    assert ready["mode"] == "真实小车" and ready["car_online"]
+                    lease = json.loads(await browser.recv())["id"]
+                    await browser.send(json.dumps({"type": "presence", "lease": lease}))
+                    await browser.send(json.dumps({"type": "drive", "direction": "forward", "lease": "invalid"}))
+                    assert "过期" in json.loads(await browser.recv())["message"]
+                    await browser.send(json.dumps({"type": "drive", "direction": "forward", "lease": lease}))
+                    await asyncio.sleep(0.02)
+                    drive = await _poll(device, 2)
+                    assert (drive["op"], drive["l"], drive["r"], drive["ms"]) == ("drive", 40, 40, 400)
+                    await _ack(device, drive)
+                    await browser.send(json.dumps({"type": "stop"}))
+                    await asyncio.sleep(0.02)
+                    halt = await _poll(device, 3)
+                    assert halt["op"] == "halt"
+                    await _ack(device, halt)
+        finally:
+            demo.server.close()
+            gateway.server.close()
+            await demo.server.wait_closed()
+            await gateway.server.wait_closed()
+            await tank.close()
 
     asyncio.run(run())
