@@ -231,3 +231,50 @@ def test_real_control_requires_fresh_page_and_stop_reaches_device():
             await tank.close()
 
     asyncio.run(run())
+
+
+def test_pad_stop_supersedes_unsent_motion_on_device_gateway():
+    async def run():
+        gateway, url = await _open_gateway()
+        owner = {}
+        tank = TankExecutor(CloudCarBackend(gateway, lambda: owner["demo"].controller_authorized()),
+                            max_speed=40, fire_enabled=False)
+        demo = CloudDemo(tank, "b" * 40, gateway)
+        owner["demo"] = demo
+        await tank.start()
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        await demo.start(port)
+        try:
+            async with connect(url) as device:
+                await _auth(device)
+                await _poll(device, 1)
+                async with connect(f"ws://127.0.0.1:{port}/control", origin=f"http://127.0.0.1:{port}") as browser:
+                    await browser.send(json.dumps({"type": "auth", "token": "b" * 40}))
+                    assert json.loads(await browser.recv())["car_online"]
+                    lease = json.loads(await browser.recv())["id"]
+                    await browser.send(json.dumps({"type": "presence", "lease": lease}))
+                    await browser.send(json.dumps({"type": "pad", "l": 28, "r": -12, "lease": lease}))
+                    await asyncio.sleep(0.02)
+                    drive = await _poll(device, 2)
+                    assert (drive["op"], drive["l"], drive["r"], drive["ms"]) == ("drive", 28, -12, 400)
+                    # 车尚未确认上一条时，拖动到新位置并松手。
+                    await browser.send(json.dumps({"type": "pad", "l": 40, "r": 40, "lease": lease}))
+                    await browser.send(json.dumps({"type": "stop"}))
+                    await asyncio.sleep(0.02)
+                    await _ack(device, drive)
+                    await asyncio.sleep(0.02)
+                    halt = await _poll(device, 3)
+                    assert halt["op"] == "halt"
+                    await _ack(device, halt)
+                    await asyncio.sleep(0.02)
+                    assert (await _poll(device, 4))["type"] == "noop"
+        finally:
+            demo.server.close()
+            gateway.server.close()
+            await demo.server.wait_closed()
+            await gateway.server.wait_closed()
+            await tank.close()
+
+    asyncio.run(run())
