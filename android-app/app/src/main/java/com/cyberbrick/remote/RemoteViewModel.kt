@@ -24,12 +24,12 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
-        if (remember && initialSettings.first.password.isNotEmpty()) connect(initialSettings.first, true)
+        if (remember && initialSettings.first.password.isNotEmpty()) connect(initialSettings.first, true, restoring = true)
     }
-    fun connect(config: ConnectionConfig, savePassword: Boolean) {
+    fun connect(config: ConnectionConfig, savePassword: Boolean, restoring: Boolean = false) {
         audio.stopRecording(); audio.flush()
         pendingConfig = config; remember = savePassword
-        cloud.connect(config)
+        if (restoring) cloud.restore(config) else cloud.connect(config)
     }
     fun stop() { audio.stopRecording(); audio.flush(); cloud.stop() }
     fun setRemember(value: Boolean) {

@@ -115,11 +115,19 @@ class CloudClient(
         }, 100, 100, TimeUnit.MILLISECONDS)
     }
 
-    fun connect(config: ConnectionConfig) {
+    fun connect(config: ConnectionConfig) = connect(config, restoring = false)
+
+    /** 冷启动可能赶上本机旧会话仍在释放，允许有限次数的占用重试。 */
+    fun restore(config: ConnectionConfig) = connect(config, restoring = true)
+
+    private fun connect(config: ConnectionConfig, restoring: Boolean) {
         try { config.endpoint() } catch (error: IllegalArgumentException) { report(error.message ?: "连接信息无效"); return }
         catch (error: IllegalStateException) { report(error.message ?: "连接信息无效"); return }
         disconnect()
-        synchronized(lock) { desired = config; retryCount = 0; if (foreground) open(config) }
+        synchronized(lock) {
+            desired = config; retryCount = 0; busyRetryBudget = if (restoring) 2 else 0
+            if (foreground) open(config)
+        }
     }
 
     private fun open(config: ConnectionConfig) {
