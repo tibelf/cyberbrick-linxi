@@ -229,7 +229,9 @@ class CloudClient(
                     when (event.optString("type")) {
                         "conn" -> {
                             val status = event.optString("state", "offline")
-                            mutable.update { it.copy(linx = status, audio = if (status == "connected") it.audio else null) }
+                            mutable.update { it.copy(linx = status, audio = if (status == "connected") it.audio else null,
+                                speaking = status == "connected" && it.speaking,
+                                message = if (status == "connected") "灵矽已连接" else "灵矽语音连接中") }
                             if (status != "connected") { micLive = false; lost = true }
                         }
                         "user" -> mutable.update { it.copy(userText = event.optString("text")) }
@@ -241,7 +243,12 @@ class CloudClient(
                         }
                     }
                 }
-                "activation" -> mutable.update { it.copy(message = "请先在灵矽设备管理绑定激活码：${msg.optString("code")}") }
+                "activation" -> {
+                    val code = if (msg.isNull("code")) "" else msg.optString("code")
+                    mutable.update { it.copy(message = if (code.matches(Regex("[0-9]{6}")))
+                        "请先在灵矽设备管理绑定激活码：$code"
+                        else if (it.linx == "connected") "灵矽已连接" else "正在连接灵矽") }
+                }
                 "action_result" -> {
                     if (msg.optString("action") == "fire") shotUntil = now() + msg.optLong("cooldown_ms", 2000).coerceIn(0, 10_000)
                     mutable.update { it.copy(message = msg.optString("message"), error = null) }

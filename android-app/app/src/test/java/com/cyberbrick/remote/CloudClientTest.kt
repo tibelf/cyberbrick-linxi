@@ -206,6 +206,24 @@ class CloudClientTest {
         assertFalse(client.state.value.armed)
     }
 
+    @Test fun `灵矽重连清除旧播报状态且空激活码不误报未绑定`() {
+        val peer=connect()
+        peer.send("""{"type":"linx_event","event":{"type":"speaking","on":true}}""")
+        await {client.state.value.speaking}
+        peer.send("""{"type":"linx_event","event":{"type":"conn","state":"offline"}}""")
+        await {client.state.value.audio==null}
+        assertFalse(client.state.value.speaking)
+        peer.send("""{"type":"activation","code":"123456"}""")
+        await {client.state.value.message.contains("123456")}
+        peer.send("""{"type":"activation","code":null}""")
+        peer.send("""{"type":"linx_event","event":{"type":"conn","state":"connected"}}""")
+        peer.send("""{"type":"audio_format","format":"pcm","sample_rate":16000,"channels":1,"bit_depth":16}""")
+        await {client.state.value.audio!=null && client.state.value.linx=="connected"}
+        assertFalse(client.state.value.message.contains("绑定激活码"))
+        assertFalse(client.state.value.message.contains("null"))
+        assertTrue(client.microphone(true))
+    }
+
     @Test fun `生产客户端拒绝未知CA且不降低证书验证`() {
         client.close()
         client=CloudClient()
