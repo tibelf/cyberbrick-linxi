@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>CyberBrick 小车离线</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><style>body{margin:0}a{color:#E8C547}a:hover{color:#F8DA70}</style></helmet>
+<div style="width:390px;height:844px;box-sizing:border-box;background:#12151A;color:#F2F3F5;font-family:Roboto,'Noto Sans SC','PingFang SC',sans-serif;display:flex;flex-direction:column;padding-top:20px;overflow:hidden">
+  <header style="height:56px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:0 20px;gap:12px"><strong style="font-size:20px;letter-spacing:-.4px">CyberBrick</strong><a href="Connect.dc.html" style="min-width:72px;height:44px;padding:0 10px;box-sizing:border-box;border:1px solid #3B4350;border-radius:13px;color:#CFD6E0;font-size:12px;display:flex;align-items:center;justify-content:center;text-decoration:none">连接设置</a></header>
+  <main style="flex:1;min-height:0;padding:14px 20px 0;display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;height:30px"><span style="color:#DCE2EB">云端服务已连接</span><span style="color:{{accent}}">{{connectionState}}</span></div>
+    <div style="flex:1;min-height:160px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px">
+      <div style="width:80px;height:80px;border:1px solid #5D5140;border-radius:26px;background:#302B24;color:#E8C99A;display:flex;align-items:center;justify-content:center"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h16v10H4zM8 8V5h8v3M2 3l20 19M7 12v2M17 13v2"></path></svg></div>
+      <h1 style="font-size:28px;letter-spacing:-.8px;font-weight:650;margin:0">{{title}}</h1>
+      <p style="font-size:13px;line-height:23px;color:#B6BFCC;text-align:center;margin:0;max-width:290px">{{description}}</p>
+    </div>
+    <section style="display:flex;flex-direction:column;gap:18px;padding:18px;border:1px solid #353D49;border-radius:20px;background:#1D222A">
+      <div style="display:flex;align-items:flex-start;gap:13px">
+        <span style="width:32px;height:32px;flex-shrink:0;border:1px solid #4D5663;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#CDD5E1"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 2v9M6 5a9 9 0 1 0 12 0"></path></svg></span>
+        <div style="display:flex;flex-direction:column;gap:6px"><h2 style="font-size:14px;font-weight:600;margin:0">检查小车电源</h2><p style="font-size:12px;line-height:21px;color:#B1BCCB;margin:0">确认小车已经开机，电池有电。</p></div>
+      </div>
+      <div style="height:1px;background:#343D49"></div>
+      <div style="display:flex;align-items:flex-start;gap:13px">
+        <span style="width:32px;height:32px;flex-shrink:0;border:1px solid #4D5663;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#CDD5E1"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 8a15 15 0 0 1 18 0M6 12a10 10 0 0 1 12 0M9 16a5 5 0 0 1 6 0M12 20h.01"></path></svg></span>
+        <div style="display:flex;flex-direction:column;gap:6px"><h2 style="font-size:14px;font-weight:600;margin:0">保持原热点开启</h2><p style="font-size:12px;line-height:21px;color:#B1BCCB;margin:0">使用已配置的 2.4 GHz 热点，<br>保持名称、密码不变并能上网。</p></div>
+      </div>
+    </section>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <sc-if value="{{notRecovered}}" hint-placeholder-val="{{true}}"><button type="button" onClick="{{retry}}" disabled="{{checking}}" style="width:100%;height:56px;border:1px solid #D5B448;border-radius:16px;background:{{accent}};color:#171A20;font-family:inherit;font-size:15px;font-weight:700">{{retryLabel}}</button></sc-if>
+      <sc-if value="{{recovered}}" hint-placeholder-val="{{false}}"><a href="Main.dc.html" style="height:56px;display:flex;align-items:center;justify-content:center;border:1px solid #D5B448;border-radius:16px;background:{{accent}};color:#171A20;font-size:15px;font-weight:700;text-decoration:none">返回遥控</a></sc-if>
+      <p style="margin:0;font-size:11px;line-height:18px;text-align:center;color:#AFB9C8">连接恢复后，再重新发出操作指令。</p>
+    </div>
+  </main>
+  <footer style="flex-shrink:0;padding:12px 20px 12px;display:flex;flex-direction:column;gap:8px">
+    <button type="button" disabled="{{true}}" style="height:52px;border:1px solid #424A57;border-radius:15px;background:#242B35;color:#A6B0BF;font-family:inherit;font-size:14px;font-weight:600">小车离线 · 控车已暂停</button>
+    <nav aria-label="主导航" style="height:64px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;border-top:1px solid #2A303A;padding-top:6px;box-sizing:border-box">
+      <a href="Main.dc.html" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:{{accent}};text-decoration:none;font-size:11px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="4"></rect><path d="M7 12h5M9.5 9.5v5M16 11h1M17 14h1"></path></svg>遥控</a>
+      <a href="Voice.dc.html" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:#AEB7C6;text-decoration:none;font-size:11px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M6 10v2a6 6 0 0 0 12 0v-2M12 18v3M9 21h6"></path></svg>语音</a>
+      <a href="Connect.dc.html" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:#AEB7C6;text-decoration:none;font-size:11px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m9 15 6-6M8 17l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0M16 7l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0" transform="translate(0 -1)"></path></svg>连接</a>
+    </nav>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#E8C547","options":["#E8C547","#94BDF7","#C7D890"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  state = {phase: 'offline'};
+  componentWillUnmount() { clearTimeout(this.retryTimer); }
+  renderVals() {
+    const recovered = this.state.phase === 'recovered';
+    const checking = this.state.phase === 'checking';
+    return {
+      accent: this.props.accent ?? '#E8C547', recovered, checking, notRecovered: !recovered,
+      connectionState: recovered ? '小车已上线' : checking ? '检查中' : '小车离线',
+      title: recovered ? '小车重新上线' : '小车暂时离线',
+      description: recovered ? '现在可以返回遥控。发射仍保持锁定。' : '操作已暂停，发射已锁定。暂时无法确认小车状态。',
+      retryLabel: checking ? '正在检查连接…' : '重新检查连接',
+      retry: () => {
+        if (checking) return;
+        this.setState({phase: 'checking'});
+        this.retryTimer = setTimeout(() => this.setState({phase: 'recovered'}), 1000);
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>

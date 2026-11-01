@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>CyberBrick 炮台与单发</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><style>body{margin:0}a{color:#E8C547}a:hover{color:#F8DA70}</style></helmet>
+<div style="width:390px;height:844px;box-sizing:border-box;background:#12151A;color:#F2F3F5;font-family:Roboto,'Noto Sans SC','PingFang SC',sans-serif;display:flex;flex-direction:column;padding-top:20px;overflow:hidden">
+  <header style="height:56px;flex-shrink:0;display:flex;align-items:center;gap:12px;padding:0 20px">
+    <a href="Main.dc.html" aria-label="返回遥控" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;border:1px solid #353B45;border-radius:14px;color:#D6DBE3;text-decoration:none"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M20 12H4m6-6-6 6 6 6"></path></svg></a>
+    <h1 style="font-size:21px;letter-spacing:-.5px;margin:0;font-weight:700">炮台与单发</h1>
+  </header>
+  <main style="flex:1;min-height:0;padding:18px 20px 0;display:flex;flex-direction:column;gap:22px">
+    <section style="border:1px solid #4D4940;background:#24251F;border-radius:18px;padding:15px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="{{accent}}" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="3"></rect><path d="M8 10V7a4 4 0 0 1 8 0"></path></svg>
+        <div style="display:flex;flex-direction:column;gap:5px"><strong style="font-size:14px;color:#F1E9CC">{{armStatus}}</strong><span style="font-size:11px;color:#C4C1B3">仅本次连接有效</span></div>
+      </div>
+      <button type="button" onClick="{{toggleArm}}" style="min-width:72px;height:44px;border:1px solid #6F6A50;background:#303128;border-radius:12px;color:#EFEAD7;font-family:inherit;font-size:13px;font-weight:600">{{armButton}}</button>
+    </section>
+    <section style="display:flex;flex-direction:column;gap:13px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h2 style="font-size:16px;margin:0;font-weight:650">先微调炮台</h2><span style="font-size:11px;color:#B2BCCB">每次调整一点</span></div>
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+        <button type="button" onClick="{{up}}" style="height:100px;border:1px solid #3D4552;border-radius:20px;background:#222832;color:#EDF0F5;font-family:inherit;font-size:14px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M12 20V4m-6 6 6-6 6 6"></path></svg>抬高一点</button>
+        <button type="button" onClick="{{down}}" style="height:100px;border:1px solid #3D4552;border-radius:20px;background:#222832;color:#EDF0F5;font-family:inherit;font-size:14px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M12 4v16m-6-6 6 6 6-6"></path></svg>压低一点</button>
+      </div>
+    </section>
+    <section style="flex:1;min-height:210px;padding:22px 18px;box-sizing:border-box;border:1px solid #353C47;border-radius:24px;background:#1D222A;display:flex;flex-direction:column;justify-content:space-between;gap:18px">
+      <div style="display:flex;flex-direction:column;gap:8px"><h2 style="font-size:22px;letter-spacing:-.5px;font-weight:650;margin:0">单次发射</h2><p style="font-size:12px;line-height:21px;color:#B5BECC;margin:0">每次一发，等待冷却后可再次发射。</p></div>
+      <button type="button" onClick="{{fire}}" disabled="{{fireDisabled}}" style="height:78px;flex-shrink:0;border:1px solid {{fireBorder}};border-radius:18px;background:{{fireBackground}};color:{{fireColor}};font-family:inherit;font-size:19px;font-weight:750;display:flex;align-items:center;justify-content:center;gap:12px">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m13 2-8 12h6l-1 8 9-13h-6z"></path></svg>
+        {{fireLabel}}
+      </button>
+      <p style="font-size:12px;line-height:20px;color:#C2CAD6;margin:0;text-align:center" aria-live="polite">{{feedback}}</p>
+    </section>
+    <p style="font-size:11px;line-height:19px;color:#AEB8C8;margin:0;text-align:center">立即停止、断开连接或切到后台会锁定发射。</p>
+  </main>
+  <footer style="flex-shrink:0;padding:12px 20px 12px;display:flex;flex-direction:column;gap:8px">
+    <button type="button" onClick="{{stop}}" style="height:52px;border:1px solid #82534F;border-radius:15px;background:#42282B;color:#FFD6D0;font-family:inherit;font-size:15px;font-weight:650;display:flex;align-items:center;justify-content:center;gap:9px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 3h8l5 5v8l-5 5H8l-5-5V8z"></path><path d="M9 9h6v6H9z"></path></svg>立即停止并锁定</button>
+    <nav aria-label="主导航" style="height:64px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;border-top:1px solid #2A303A;padding-top:6px;box-sizing:border-box">
+      <a href="Main.dc.html" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:{{accent}};text-decoration:none;font-size:11px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="4"></rect><path d="M7 12h5M9.5 9.5v5M16 11h1M17 14h1"></path></svg>遥控</a>
+      <a href="Voice.dc.html" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:#AEB7C6;text-decoration:none;font-size:11px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M6 10v2a6 6 0 0 0 12 0v-2M12 18v3M9 21h6"></path></svg>语音</a>
+      <a href="Connect.dc.html" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:#AEB7C6;text-decoration:none;font-size:11px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m9 15 6-6M8 17l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0M16 7l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0" transform="translate(0 -1)"></path></svg>连接</a>
+    </nav>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#E8C547","options":["#E8C547","#94BDF7","#C7D890"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  state = {armed: true, remaining: 0, feedback: '准备就绪 · 每次点击发射一发'};
+  componentWillUnmount() { clearInterval(this.cooldownTimer); }
+  renderVals() {
+    const armed = this.state.armed;
+    const cooling = this.state.remaining > 0;
+    const accent = this.props.accent ?? '#E8C547';
+    const stop = () => {
+      clearInterval(this.cooldownTimer);
+      this.setState({armed: false, remaining: 0, feedback: '已停止 · 发射已锁定'});
+    };
+    return {
+      accent, armStatus: armed ? '发射已启用' : '发射已锁定', armButton: armed ? '锁定' : '启用',
+      feedback: this.state.feedback, fireDisabled: !armed || cooling,
+      fireLabel: !armed ? '发射已锁定' : cooling ? '冷却中 · ' + this.state.remaining + ' 秒' : '发射一发',
+      fireBorder: armed && !cooling ? '#D5B448' : '#444D5B',
+      fireBackground: armed && !cooling ? accent : '#2B333F', fireColor: armed && !cooling ? '#171A20' : '#BDC7D6',
+      stop,
+      toggleArm: () => armed ? stop() : this.setState({armed: true, feedback: '准备就绪 · 每次点击发射一发'}),
+      up: () => this.setState({feedback: '炮台抬高一点'}), down: () => this.setState({feedback: '炮台压低一点'}),
+      fire: () => {
+        if (!armed || cooling) return;
+        this.setState({remaining: 2, feedback: '已安排单发 · 等待冷却'});
+        clearInterval(this.cooldownTimer);
+        this.cooldownTimer = setInterval(() => {
+          const next = this.state.remaining - 1;
+          if (next <= 0) { clearInterval(this.cooldownTimer); this.setState({remaining: 0, feedback: '冷却结束 · 可以再次单发'}); }
+          else this.setState({remaining: next});
+        }, 1000);
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>
