@@ -66,7 +66,7 @@ class NativeAudio(private val context: Context, private val cloud: CloudClient) 
         cloud.onAudioFlush = ::flush
         cloud.onLost = { stopRecording(); flush(); spec = cloud.state.value.audio }
         cloud.onSpeaking = ::stopRecording
-        clock.scheduleAtFixedRate({
+        clock.scheduleWithFixedDelay({
             val now = SystemClock.elapsedRealtime()
             val recording = mutable.value.recording
             if (recording) {

@@ -93,12 +93,12 @@ class CloudClient(
     private val silence = ByteArray(640).toByteString()
 
     init {
-        executor.scheduleAtFixedRate({
+        executor.scheduleWithFixedDelay({
             synchronized(lock) {
                 if (foreground && mutable.value.connected && mutable.value.audio != null && !micLive) raw(silence)
             }
         }, 20, 20, TimeUnit.MILLISECONDS)
-        executor.scheduleAtFixedRate({
+        executor.scheduleWithFixedDelay({
             synchronized(lock) {
                 manual?.let { direction ->
                     if (canAct()) command("drive", "direction" to direction)
@@ -145,15 +145,15 @@ class CloudClient(
                 finish(code, id)
             }
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = finish(code, id)
-            override fun onFailure(webSocket: WebSocket, error: Throwable, response: Response?) {
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 val reason = when {
                     response?.code == 401 -> "用户名或控制密码不正确"
                     response?.code == 403 -> "服务器拒绝连接，请检查服务器地址"
                     response?.code == 429 -> "连接过于频繁，请稍后重试"
-                    error is SSLException -> "证书验证失败，请检查服务器证书和手机时间"
+                    t is SSLException -> "证书验证失败，请检查服务器证书和手机时间"
                     else -> "网络连接中断，正在尝试恢复"
                 }
-                failed(id, reason, response?.code !in listOf(401, 403) && error !is SSLException)
+                failed(id, reason, response?.code !in listOf(401, 403) && t !is SSLException)
             }
         })
         opening = executor.schedule({ if (current(id) && !mutable.value.connected) failed(id, "连接云端超时", true) }, 16, TimeUnit.SECONDS)

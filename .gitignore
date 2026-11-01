@@ -1,5 +1,6 @@
 .DS_Store
 __pycache__/
+/dist/
 
 # 本地设计编辑器的进程状态、访问地址和评论不进入公开仓库
 designs/**/.artifact-server.json

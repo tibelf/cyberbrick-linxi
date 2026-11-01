@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <application
         android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:label="CyberBrick 遥控"
         android:icon="@drawable/ic_launcher"
         android:theme="@style/Theme.CyberBrick"

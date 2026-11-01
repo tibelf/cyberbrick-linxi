@@ -4,7 +4,7 @@ Kotlin + Jetpack Compose 原生界面，直接复用已部署的云端 `/control
 
 ## 使用
 
-1. 在 Android 8.0 或更新的手机安装 APK。
+1. 在 Android 8.0 或更新的手机安装 APK。下载地址为现有 HTTPS 入口的 `/android/cyberbrick-v0.1.0.apk`，仍需原有用户名和密码。
 2. 先断开旧网页控制端，在 App「连接」填写现有云端地址、用户名 `car` 与控制密码。仓库和 APK 不包含密码或灵矽 Device-Id。
 3. 小车开机并连接原有 2.4 GHz 热点；页面显示真实小车在线后，可按住方向键移动、松手停车。
 4. 「语音」点击开始说话，首次允许麦克风权限，再次点击结束；音量条、计时、识别与回复来自实际链路。回复期间不能继续收音。
@@ -35,4 +35,6 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - `RemoteViewModel.kt`：生命周期与状态协调。
 - `RemoteApp.kt`、`ControlScreens.kt`、`ConnectionScreen.kt`、`Appearance.kt`：原生界面与灰黑黄色设计。
 
-首次完整界面编译已通过。协议自动测试、真机安装、语音和实际动作仍在本轮继续验证，最终结果见 `docs/HANDOFF.md`。
+`assembleDebug`、10 项本地 WSS 协议测试与 `lintDebug` 已通过；Lint 0 错误、9 个版本/风格建议。APK 的 v2 签名验证通过，约 13 MB，Android 8.0+。协议测试涵盖认证、租约过期停车、单发锁定与冷却、PCM 帧与静音、回复停麦、后台/断线重连不重放和未知 CA 拒绝，均不连接实车。
+
+真机安装、原生麦克风/扬声器、实际云端语音和控车仍待实测。用户已开启调试并重新插线，但 Mac 的 ADB 暂未识别手机；本机 API 37.2 模拟器两种渲染模式均在系统启动时崩溃，未用于声称 App 启动成功。

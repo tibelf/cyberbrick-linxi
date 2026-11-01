@@ -39,8 +39,8 @@ enum class Symbol { UP, DOWN, LEFT, RIGHT, MIC, STOP, LOCK, UNLOCK, GAMEPAD, LIN
 
 /** 简洁原生线性图标，与设计稿保持一致。文字由所在控件提供无障碍标签。 */
 @Composable
-fun Glyph(symbol: Symbol, modifier: Modifier = Modifier.size(22.dp), color: Color = MaterialTheme.colorScheme.onSurface) {
-    Canvas(modifier) {
+fun Glyph(symbol: Symbol, modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.onSurface) {
+    Canvas(modifier.size(22.dp)) {
         val sx = size.width / 24f
         val sy = size.height / 24f
         val width = 1.8f * sx
