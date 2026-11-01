@@ -1,0 +1,147 @@
+"""模拟设备验证认证、超时、取消与断线时的动作安全。"""
+
+import asyncio
+import json
+
+import pytest
+from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosedError
+
+from linx_client.cloud_car import CloudCarBackend, CloudCarGateway, COMMAND_AGE_S
+
+
+async def _open_gateway():
+    gateway = CloudCarGateway("a" * 40)
+    await gateway.start(0)
+    port = gateway.server.sockets[0].getsockname()[1]
+    return gateway, f"ws://127.0.0.1:{port}/device"
+
+
+async def _auth(ws, token="a" * 40):
+    await ws.send(json.dumps({"type": "auth", "token": token}))
+    return json.loads(await ws.recv())
+
+
+async def _poll(ws, nonce):
+    await ws.send(json.dumps({"type": "poll", "nonce": nonce}))
+    return json.loads(await ws.recv())
+
+
+async def _ack(ws, command, ok=True):
+    await ws.send(json.dumps({"type": "ack", "id": command["id"], "ok": ok}))
+
+
+async def _close(gateway):
+    gateway.server.close()
+    await gateway.server.wait_closed()
+
+
+def test_authenticated_device_and_acknowledged_command():
+    async def run():
+        gateway, url = await _open_gateway()
+        backend = CloudCarBackend(gateway, lambda: True)
+        states = []
+        gateway.on_status = states.append
+        try:
+            async with connect(url) as denied:
+                with pytest.raises(ConnectionClosedError) as rejected:
+                    await _auth(denied, "wrong")
+                assert rejected.value.rcvd.code == 4001
+            async with connect(url) as device:
+                assert (await _auth(device))["type"] == "ready"
+                assert (await _poll(device, 1))["type"] == "noop"
+                assert (await backend.ping())["online"]
+                action = asyncio.create_task(backend.drive(20, 20, 400))
+                await asyncio.sleep(0)
+                command = await _poll(device, 2)
+                assert (command["op"], command["l"], command["r"], command["ms"]) == ("drive", 20, 20, 400)
+                assert not action.done()
+                await _ack(device, command)
+                await action
+                with pytest.raises(RuntimeError, match="发射"):
+                    await backend.fire(300)
+            await asyncio.sleep(0.01)
+            assert states == [True, False]
+            assert not gateway.online
+        finally:
+            await _close(gateway)
+
+    asyncio.run(run())
+
+
+def test_expired_command_is_not_replayed_on_reconnect():
+    async def run():
+        gateway, url = await _open_gateway()
+        backend = CloudCarBackend(gateway, lambda: True)
+        try:
+            async with connect(url) as device:
+                await _auth(device)
+                await _poll(device, 1)
+                action = asyncio.create_task(backend.drive(20, 20, 400))
+                await asyncio.sleep(COMMAND_AGE_S + 0.05)
+                assert (await _poll(device, 2))["type"] == "noop"
+                with pytest.raises(TimeoutError):
+                    await action
+            async with connect(url) as next_device:
+                await _auth(next_device)
+                assert (await _poll(next_device, 1))["type"] == "noop"
+        finally:
+            await _close(gateway)
+
+    asyncio.run(run())
+
+
+def test_stop_supersedes_pending_motion_and_disconnect_fails_outstanding():
+    async def run():
+        gateway, url = await _open_gateway()
+        backend = CloudCarBackend(gateway, lambda: True)
+        disconnected = []
+        gateway.on_disconnect = lambda: disconnected.append(True)
+        try:
+            async with connect(url) as device:
+                await _auth(device)
+                await _poll(device, 1)
+                motion = asyncio.create_task(backend.drive(20, 20, 400))
+                await asyncio.sleep(0)
+                halt = asyncio.create_task(backend.halt())
+                await asyncio.sleep(0)
+                with pytest.raises(ConnectionError, match="停车"):
+                    await motion
+                command = await _poll(device, 2)
+                assert command["op"] == "halt"
+                await _ack(device, command)
+                await halt
+                pending = asyncio.create_task(backend.drive(20, 20, 400))
+                await asyncio.sleep(0)
+            with pytest.raises(ConnectionError, match="中断"):
+                await pending
+            assert disconnected
+        finally:
+            await _close(gateway)
+
+    asyncio.run(run())
+
+
+def test_device_must_ack_and_controller_must_be_authorized():
+    async def run():
+        gateway, url = await _open_gateway()
+        backend = CloudCarBackend(gateway, lambda: False)
+        try:
+            async with connect(url) as device:
+                await _auth(device)
+                await _poll(device, 1)
+                with pytest.raises(RuntimeError, match="控制者"):
+                    await backend.drive(20, 20, 400)
+                assert (await _poll(device, 2))["type"] == "noop"
+                pending = asyncio.create_task(gateway.command("drive", l=20, r=20, ms=400))
+                await asyncio.sleep(0)
+                assert (await _poll(device, 3))["op"] == "drive"
+                with pytest.raises(ConnectionClosedError) as rejected:
+                    await _poll(device, 4)
+                assert rejected.value.rcvd.code == 4003
+                with pytest.raises(ConnectionError):
+                    await pending
+        finally:
+            await _close(gateway)
+
+    asyncio.run(run())
