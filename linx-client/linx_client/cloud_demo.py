@@ -26,9 +26,9 @@ CONTROLLER_TIMEOUT_S = 1.5
 
 
 class CloudDemo:
-    """网页和动作入口。只监听回环地址；实车模式中发射始终锁定。"""
+    """网页和动作入口；发射默认锁定，需本次控制会话主动启用。"""
 
-    def __init__(self, tank: TankExecutor, token: str, gateway=None):
+    def __init__(self, tank: TankExecutor, token: str, gateway=None, fire_allowed=False):
         if len(token) < 32:
             raise ValueError("请设置至少 32 个字符的随机 CAR_DEMO_TOKEN")
         self.tank = tank
@@ -42,12 +42,40 @@ class CloudDemo:
         self.gateway = gateway
         self._leases = deque(maxlen=4)
         self._last_presence = 0.0
+        self._fire_allowed = fire_allowed
+        self._armed = False
+        self._next_shot_at = 0.0
+        self.tank.fire_enabled = False
+
+    def fire_status(self):
+        if not self._fire_allowed:
+            reason = "云端尚未启用发射"
+        elif self.gateway and not self.gateway.online:
+            reason = "等待小车上线"
+        elif self.gateway and not self.gateway.fire_supported:
+            reason = "小车程序待更新，暂不能发射"
+        else:
+            reason = "已启用：每次点击发射一发" if self._armed else "发射已锁定，启用后可单发"
+            return {"available": True, "armed": self._armed, "reason": reason}
+        return {"available": False, "armed": False, "reason": reason}
+
+    def _set_armed(self, on):
+        self._armed = on
+        self.tank.fire_enabled = on
+        self.publish({"type": "fire_state", **self.fire_status()})
+
+    def fire_authorized(self):
+        return (self._armed and self._controller is not None and self.fire_status()["available"]
+                and (not self.gateway or self.controller_authorized()))
 
     def controller_authorized(self):
         return self._controller is not None and time.monotonic() - self._last_presence < CONTROLLER_TIMEOUT_S
 
     def on_car_status(self, online):
+        if not online:
+            self._set_armed(False)
         self.publish({"type": "car_status", "online": online})
+        self.publish({"type": "fire_state", **self.fire_status()})
 
     def _valid_lease(self, value):
         return isinstance(value, str) and any(
@@ -166,6 +194,7 @@ class CloudDemo:
             owner = True
             mode = "真实小车" if self.gateway else "模拟小车"
             await ws.send(json.dumps({"type": "ready", "mode": mode, "linx": self.linx_state,
+                                      "fire": self.fire_status(),
                                       "car_online": self.gateway.online if self.gateway else True},
                                      ensure_ascii=False))
             sender = asyncio.create_task(self._send_loop(ws, self._outgoing))
@@ -187,6 +216,8 @@ class CloudDemo:
                     if not isinstance(cmd, dict):
                         raise ValueError("指令格式错误")
                     if cmd.get("type") == "stop":
+                        if self._armed:
+                            self._set_armed(False)
                         await self.tank.stop()
                     elif cmd.get("type") == "presence" and self.gateway:
                         if not self._valid_lease(cmd.get("lease")):
@@ -201,6 +232,40 @@ class CloudDemo:
                         if direction not in values:
                             raise ValueError("未知方向")
                         await self.tank.manual(*values[direction])
+                    elif cmd.get("type") in ("barrel", "fire_arm", "fire"):
+                        kind = cmd["type"]
+                        # 锁定和急停一样始终可以执行；其他操作必须来自新鲜网页。
+                        disarm = kind == "fire_arm" and cmd.get("on") is False
+                        if self.gateway and not disarm and not self._valid_lease(cmd.get("lease")):
+                            raise ValueError("控制指令已过期，请重试")
+                        if kind == "barrel":
+                            direction = cmd.get("direction")
+                            if direction not in ("up", "down"):
+                                raise ValueError("炮台方向无效")
+                            await self.tank.stop()
+                            result = self.tank.barrel(direction, 200)
+                            self.publish({"type": "action_result", "action": kind, "message": result})
+                        elif kind == "fire_arm":
+                            on = cmd.get("on")
+                            if type(on) is not bool:
+                                raise ValueError("启用发射参数无效")
+                            if on and not self.fire_status()["available"]:
+                                raise PermissionError(self.fire_status()["reason"])
+                            self._set_armed(on)
+                            if not on:
+                                await self.tank.stop()
+                        else:
+                            if not self.fire_authorized():
+                                raise PermissionError("请先在网页启用发射")
+                            now = time.monotonic()
+                            if self.tank.busy or now < self._next_shot_at:
+                                raise RuntimeError("小车正在执行动作或发射冷却中，请稍后再试")
+                            await self.tank.stop()
+                            result = self.tank.fire(1)
+                            cooldown_ms = self.tank.fire_pulse_ms + int(self.tank.fire_cooldown_s * 1000)
+                            self._next_shot_at = time.monotonic() + cooldown_ms
+                            self.publish({"type": "action_result", "action": kind, "message": result,
+                                          "cooldown_ms": cooldown_ms})
                     elif cmd.get("type") == "mic":
                         if self.session is None or not isinstance(cmd.get("on"), bool):
                             raise ValueError("灵矽语音尚未接入")
@@ -217,6 +282,7 @@ class CloudDemo:
                     if self.session:
                         self.session.mic_enabled = False
                     self._last_presence = 0.0
+                    self._set_armed(False)
                     await self.tank.stop()
                 finally:
                     self._outgoing = None
@@ -229,18 +295,19 @@ class CloudDemo:
 
 
 async def _run(port: int, token: str, https_origin: str | None = None, linx_state: str | None = None,
-               real_car: bool = False, car_port: int = 18767):
+               real_car: bool = False, car_port: int = 18767, allow_fire: bool = False):
     gateway = None
     if real_car:
         from .cloud_car import CloudCarBackend, CloudCarGateway
 
         gateway = CloudCarGateway(os.environ.get("CAR_DEVICE_TOKEN", ""))
         owner = {}
-        backend = CloudCarBackend(gateway, lambda: owner["demo"].controller_authorized())
+        backend = CloudCarBackend(gateway, lambda: owner["demo"].controller_authorized(),
+                                  lambda: owner["demo"].fire_authorized())
     else:
         backend = MockBackend()
     tank = TankExecutor(backend, max_speed=40, fire_enabled=False)
-    demo = CloudDemo(tank, token, gateway)
+    demo = CloudDemo(tank, token, gateway, fire_allowed=allow_fire)
     if gateway:
         owner["demo"] = demo
         gateway.on_status = demo.on_car_status
@@ -268,7 +335,7 @@ async def _run(port: int, token: str, https_origin: str | None = None, linx_stat
                                              on_event=demo.on_linx_event)
             runner = asyncio.create_task(demo.session.run_forever())
         await demo.start(port, https_origin)
-        print(f"云端控制台监听 127.0.0.1:{port}（{'真实小车，发射锁定' if gateway else '模拟小车'}）")
+        print(f"云端控制台监听 127.0.0.1:{port}（{'真实小车' if gateway else '模拟小车'}，发射默认锁定）")
         async with demo.server:
             await asyncio.Future()  # 不依赖 stdin，适合无交互测试
     finally:
@@ -288,7 +355,8 @@ def main():
     parser.add_argument("--port", type=int, default=18765, help="本机监听端口（默认 18765）")
     parser.add_argument("--https-origin", help="可选的 HTTPS 代理来源；需另外配置鉴权及限流")
     parser.add_argument("--linx-state", help="可选的独立灵矽设备身份文件")
-    parser.add_argument("--real-car", action="store_true", help="启用实车直连；需配置 CAR_DEVICE_TOKEN，发射仍锁定")
+    parser.add_argument("--real-car", action="store_true", help="启用实车直连；需配置 CAR_DEVICE_TOKEN")
+    parser.add_argument("--allow-fire", action="store_true", help="允许网页启用发射；需新版车端，每次连接仍默认锁定")
     parser.add_argument("--car-port", type=int, default=18767, help="车端连接监听端口（仅回环）")
     args = parser.parse_args()
     token = os.environ.get("CAR_DEMO_TOKEN", "")
@@ -297,7 +365,8 @@ def main():
     if args.real_car and len(os.environ.get("CAR_DEVICE_TOKEN", "")) < 32:
         parser.error("实车模式需要通过 CAR_DEVICE_TOKEN 设置至少 32 个字符的随机密码")
     try:
-        asyncio.run(_run(args.port, token, args.https_origin, args.linx_state, args.real_car, args.car_port))
+        asyncio.run(_run(args.port, token, args.https_origin, args.linx_state, args.real_car, args.car_port,
+                         args.allow_fire))
     except KeyboardInterrupt:
         print("云端控制台已停止")
 

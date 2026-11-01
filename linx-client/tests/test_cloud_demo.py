@@ -139,3 +139,66 @@ def test_real_controller_without_presence_is_disconnected_and_stopped(monkeypatc
             await tank.close()
 
     asyncio.run(run())
+
+
+def test_barrel_single_shot_lock_cooldown_and_new_controller():
+    async def run():
+        backend = MockBackend(verbose=False)
+        tank = TankExecutor(backend, max_speed=40, fire_enabled=False)
+        gateway = type("OnlineGateway", (), {"online": True, "fire_supported": True})()
+        demo = CloudDemo(tank, "a" * 40, gateway, fire_allowed=True)
+        port = _free_port()
+        await tank.start()
+        await demo.start(port)
+        lease = None
+
+        async def receive(ws, kind):
+            nonlocal lease
+            async with asyncio.timeout(2):
+                while True:
+                    msg = json.loads(await ws.recv())
+                    if msg["type"] == "lease":
+                        lease = msg["id"]
+                        await ws.send(json.dumps({"type": "presence", "lease": lease}))
+                    if msg["type"] == kind:
+                        return msg
+
+        async def send(ws, kind, **args):
+            await ws.send(json.dumps({"type": kind, "lease": lease, **args}))
+
+        try:
+            url = f"ws://127.0.0.1:{port}/control"
+            origin = f"http://127.0.0.1:{port}"
+            async with connect(url, origin=origin) as ws:
+                await ws.send(json.dumps({"type": "auth", "token": "a" * 40}))
+                ready = await receive(ws, "ready")
+                assert ready["fire"]["available"] and not ready["fire"]["armed"]
+                await receive(ws, "lease")
+                await send(ws, "fire")
+                assert "启用发射" in (await receive(ws, "error"))["message"]
+                await send(ws, "barrel", direction="up")
+                assert (await receive(ws, "action_result"))["action"] == "barrel"
+                await _wait_for(lambda: ("turret", 45, 500) in backend.calls)
+                await tank.wait_idle()
+                await send(ws, "fire_arm", on=True)
+                assert (await receive(ws, "fire_state"))["armed"]
+                assert tank.fire_enabled
+                await send(ws, "fire")
+                assert (await receive(ws, "action_result"))["action"] == "fire"
+                await _wait_for(lambda: any(c[0] == "fire" for c in backend.calls))
+                await send(ws, "fire")
+                assert "冷却" in (await receive(ws, "error"))["message"]
+                assert len([c for c in backend.calls if c[0] == "fire"]) == 1
+                await send(ws, "stop")
+                assert not (await receive(ws, "fire_state"))["armed"]
+                assert not tank.fire_enabled
+            await _wait_for(lambda: demo._controller is None)
+            async with connect(url, origin=origin) as ws:
+                await ws.send(json.dumps({"type": "auth", "token": "a" * 40}))
+                assert not (await receive(ws, "ready"))["fire"]["armed"]
+        finally:
+            demo.server.close()
+            await demo.server.wait_closed()
+            await tank.close()
+
+    asyncio.run(run())

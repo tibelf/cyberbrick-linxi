@@ -15,6 +15,14 @@
     .pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
     .pad button { min-height: 65px; touch-action: none; user-select: none; background: #dae9ff; }
     .pad button:disabled { opacity: .5; } .pad .stop { background: #df3030; color: white; }
+    .barrel { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+    .barrel button { min-height: 64px; background: #dae9ff; touch-action: manipulation; }
+    .weapons h2 { font-size: 1.1rem; margin: 0 0 .6rem; }
+    .weapons button:disabled { opacity: .45; cursor: default; }
+    .fire-controls { display: flex; gap: .5rem; }
+    .fire-controls button { flex: 1; min-height: 64px; touch-action: manipulation; }
+    #fire { background: #c92b36; color: white; font-weight: 650; }
+    #action-status { min-height: 1.5em; color: #536273; }
     .voice h2 { font-size: 1.1rem; margin: 0 0 .6rem; }
     .voice button { width: 100%; min-height: 76px; background: #2065cb; color: white;
       font-size: 1.15rem; font-weight: 650; touch-action: manipulation; user-select: none;
@@ -57,6 +65,22 @@
       <span></span><button data-direction="backward" disabled>后退</button><span></span>
     </div>
   </section>
+  <section class="weapons">
+    <h2>炮台上下调节</h2>
+    <p class="voice-help">每点一次微调一点，避免长时间顶住限位。</p>
+    <div class="barrel">
+      <button id="barrel-up" type="button" data-barrel="up" disabled>↑ 抬高一点</button>
+      <button id="barrel-down" type="button" data-barrel="down" disabled>↓ 压低一点</button>
+    </div>
+    <h2 style="margin-top:1.4rem">单发控制</h2>
+    <p id="fire-status" role="status">连接后显示发射状态</p>
+    <div class="fire-controls">
+      <button id="fire-arm" type="button" aria-pressed="false" disabled>启用发射</button>
+      <button id="fire" type="button" disabled>发射一发</button>
+    </div>
+    <p class="voice-help">启用后可点单发，也可说“发射一发”。急停、断线或切到后台会重新锁定。</p>
+    <p id="action-status" role="status" aria-live="polite"></p>
+  </section>
 </main>
 <script>
   let ws, timer, activePointer, controlLease, realMode = false, carOnline = true;
@@ -71,6 +95,22 @@
   const recordTime = document.querySelector('#record-time');
   const talkButton = document.querySelector('#talk');
   const buttons = document.querySelectorAll('.pad button');
+  const barrelButtons = document.querySelectorAll('[data-barrel]');
+  const fireArm = document.querySelector('#fire-arm');
+  const fireButton = document.querySelector('#fire');
+  const fireStatus = document.querySelector('#fire-status');
+  const actionStatus = document.querySelector('#action-status');
+  let fireState = {available: false, armed: false, reason: '连接后显示发射状态'};
+  let fireUntil = 0, fireRefreshTimer;
+  function updateFire() {
+    const connected = ws?.readyState === WebSocket.OPEN && carOnline;
+    fireArm.disabled = !connected || !fireState.available;
+    fireArm.textContent = fireState.armed ? '锁定发射' : '启用发射';
+    fireArm.setAttribute('aria-pressed', String(fireState.armed));
+    fireButton.disabled = !connected || !fireState.armed || Date.now() < fireUntil;
+    fireButton.textContent = Date.now() < fireUntil ? '冷却中…' : '发射一发';
+    fireStatus.textContent = fireState.reason;
+  }
   function send(message) {
     if (!ws || ws.readyState !== WebSocket.OPEN || ws.bufferedAmount >= 65536) return false;
     ws.send(JSON.stringify(message));
@@ -79,8 +119,16 @@
   function stop() {
     clearInterval(timer); timer = null; activePointer = null;
     send({type: 'stop'});
+    if (fireState.armed) {
+      fireState = {...fireState, armed: false, reason: '已停车，发射已锁定'};
+      updateFire();
+    }
   }
-  function enable(on) { buttons.forEach(button => button.disabled = !on); }
+  function enable(on) {
+    buttons.forEach(button => button.disabled = !on);
+    barrelButtons.forEach(button => button.disabled = !on);
+    updateFire();
+  }
   function flushAudio() {
     playing.forEach(source => { try { source.stop(); } catch (_) {} });
     playing.clear(); playbackEnd = 0;
@@ -258,7 +306,8 @@
       if (message.type === 'ready') {
         document.querySelector('#login').hidden = true;
         realMode = message.mode === '真实小车'; carOnline = message.car_online !== false;
-        document.querySelector('#mode').textContent = realMode ? '实车模式：发射已锁定。' : '模拟模式：不会连接实车或发射。';
+        document.querySelector('#mode').textContent = realMode ? '实车模式：小车直连云端。' : '模拟模式：不会连接实车或发射。';
+        fireState = message.fire || {available: false, armed: false, reason: '云端尚未启用发射'};
         status.textContent = realMode ? (carOnline ? '已连接：真实小车在线' : '已连接：等待小车上线') : '已连接：模拟小车';
         enable(carOnline);
       }
@@ -268,8 +317,19 @@
       }
       if (message.type === 'car_status') {
         carOnline = message.online === true;
+        if (!carOnline) fireState = {...fireState, armed: false, reason: '小车离线，发射已锁定'};
         status.textContent = carOnline ? '已连接：真实小车在线' : '小车已离线';
         enable(carOnline);
+      }
+      if (message.type === 'fire_state') { fireState = message; updateFire(); }
+      if (message.type === 'action_result') {
+        actionStatus.textContent = message.message;
+        if (message.action === 'fire') {
+          fireUntil = Date.now() + message.cooldown_ms;
+          clearTimeout(fireRefreshTimer);
+          fireRefreshTimer = setTimeout(updateFire, message.cooldown_ms);
+          updateFire();
+        }
       }
       if (message.type === 'audio_format') {
         audioFormat = message; updateTalkButton();
@@ -290,10 +350,27 @@
         }
         if (item.type === 'user' || item.type === 'bot') document.querySelector('#transcript').textContent = `${item.type === 'user' ? '你' : '小车'}：${item.text || ''}`;
       }
-      if (message.type === 'error') status.textContent = message.message;
+      if (message.type === 'error') { status.textContent = message.message; actionStatus.textContent = message.message; updateFire(); }
     };
-    ws.onclose = event => { clearInterval(timer); timer = null; activePointer = controlLease = null; enable(false); closeAudio(); document.querySelector('#login').hidden = false; voiceMessage('连接已断开，请重新输入密码连接', true); status.textContent = event.reason || '连接已断开'; };
+    ws.onclose = event => { clearInterval(timer); timer = null; activePointer = controlLease = null; fireState = {available: false, armed: false, reason: '连接已断开，发射已锁定'}; enable(false); closeAudio(); document.querySelector('#login').hidden = false; voiceMessage('连接已断开，请重新输入密码连接', true); status.textContent = event.reason || '连接已断开'; };
     ws.onerror = () => { status.textContent = '连接失败，请检查网络后重试'; };
+  });
+  barrelButtons.forEach(button => button.addEventListener('click', () => {
+    clearInterval(timer); timer = null; activePointer = null;
+    send({type: 'barrel', direction: button.dataset.barrel, lease: controlLease});
+  }));
+  fireArm.addEventListener('click', () => {
+    if (send({type: 'fire_arm', on: !fireState.armed, lease: controlLease})) fireArm.disabled = true;
+  });
+  fireButton.addEventListener('click', () => {
+    if (!fireState.armed || Date.now() < fireUntil) return;
+    clearInterval(timer); timer = null; activePointer = null;
+    if (send({type: 'fire', lease: controlLease})) {
+      fireUntil = Date.now() + 2000;
+      clearTimeout(fireRefreshTimer);
+      fireRefreshTimer = setTimeout(updateFire, 2000);
+      updateFire();
+    }
   });
   document.querySelectorAll('[data-direction]').forEach(button => {
     button.addEventListener('pointerdown', event => {

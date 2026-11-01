@@ -18,9 +18,15 @@ function setup({ getUserMedia } = {}) {
     }
   }
   const elements = Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(m => [`#${m[1]}`, new Element()]));
-  const pad = [new Element(), new Element()];
+  const pad = ['forward', 'backward', 'left', 'right'].map(direction => {
+    const element = new Element(); element.dataset.direction = direction; return element;
+  });
+  const barrels = ['up', 'down'].map(direction => {
+    const element = elements[`#barrel-${direction}`]; element.dataset.barrel = direction; return element;
+  });
   const document = Object.assign(new Element(), {
-    hidden: false, querySelector: key => elements[key], querySelectorAll: () => pad,
+    hidden: false, querySelector: key => elements[key], querySelectorAll: key =>
+      key === '[data-barrel]' ? barrels : key === '.pad button' ? [...pad, elements['#stop']] : pad,
   });
   const intervals = new Map();
   const timeouts = new Map();
@@ -173,4 +179,27 @@ test('灵矽开始回复时结束收音，回复期间不再开启麦克风', as
   assert.equal(h.elements['#talk'].disabled, true);
   h.packet({ type: 'linx_event', event: { type: 'speaking', on: false } });
   assert.equal(h.elements['#talk'].disabled, false);
+});
+
+test('炮台单次微调与单发按钮携带租约；锁定、冷却、离线会禁用发射', async () => {
+  const h = setup(); await h.connect();
+  h.packet({type: 'lease', id: '本次测试租约'});
+  await h.elements['#barrel-up'].emit('click');
+  assert.deepEqual(h.sockets[0].sent.at(-1), {type: 'barrel', direction: 'up', lease: '本次测试租约'});
+  assert.equal(h.elements['#fire'].disabled, true);
+  h.packet({type: 'fire_state', available: true, armed: false, reason: '发射已锁定'});
+  await h.elements['#fire-arm'].emit('click');
+  assert.deepEqual(h.sockets[0].sent.at(-1), {type: 'fire_arm', on: true, lease: '本次测试租约'});
+  h.packet({type: 'fire_state', available: true, armed: true, reason: '已启用'});
+  await h.elements['#fire'].emit('click'); await h.elements['#fire'].emit('click');
+  assert.equal(h.sockets[0].sent.filter(x => x.type === 'fire').length, 1);
+  assert.equal(h.elements['#fire'].disabled, true);
+  h.packet({type: 'action_result', action: 'fire', message: '已安排单发', cooldown_ms: 2000});
+  h.tick(2); h.timeout();
+  assert.equal(h.elements['#fire'].disabled, false);
+  await h.elements['#stop'].emit('click');
+  assert.equal(h.elements['#fire'].disabled, true);
+  h.disconnect();
+  assert.equal(h.elements['#barrel-up'].disabled, true);
+  assert.equal(h.elements['#fire-arm'].disabled, true);
 });
