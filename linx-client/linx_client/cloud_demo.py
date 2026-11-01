@@ -179,19 +179,13 @@ class CloudDemo:
                             pass
 
 
-async def _run(port: int, token: str, https_origin: str | None = None, linx_state: str | None = None,
-               camera_url: str | None = None):
+async def _run(port: int, token: str, https_origin: str | None = None, linx_state: str | None = None):
     # 这里固定模拟后端，避免误接真实车辆；发射始终关闭。
     tank = TankExecutor(MockBackend(), max_speed=40, fire_enabled=False)
     demo = CloudDemo(tank, token)
     await tank.start()
     runner = None
     try:
-        camera = None
-        if camera_url:
-            from .cloud_camera import CloudSnapshotCamera
-
-            camera = CloudSnapshotCamera(camera_url)
         if linx_state:
             from .cloud_audio import BrowserLinxSession
             from .cloud_linx import make_cloud_endpoint
@@ -204,10 +198,6 @@ async def _run(port: int, token: str, https_origin: str | None = None, linx_stat
             endpoint = make_cloud_endpoint(ident, lambda code: loop.call_soon_threadsafe(demo.on_activation, code))
             mcp = McpServer()
             register_tank_tools(mcp, tank)
-            if camera:
-                from .cloud_camera import register_cloud_camera
-
-                register_cloud_camera(mcp, ident, camera)
             demo.session = BrowserLinxSession(ident, mcp, endpoint, on_pcm=demo.publish,
                                              on_format=demo.on_audio_format, on_flush=demo.on_audio_flush,
                                              on_event=demo.on_linx_event)
@@ -231,13 +221,12 @@ def main():
     parser.add_argument("--port", type=int, default=18765, help="本机监听端口（默认 18765）")
     parser.add_argument("--https-origin", help="可选的 HTTPS 代理来源；需另外配置鉴权及限流")
     parser.add_argument("--linx-state", help="可选的独立灵矽设备身份文件（仅支持模拟车）")
-    parser.add_argument("--camera", help="可选的摄像头快照地址，仅接受服务器回环地址")
     args = parser.parse_args()
     token = os.environ.get("CAR_DEMO_TOKEN", "")
     if len(token) < 32:
         parser.error("请通过 CAR_DEMO_TOKEN 环境变量设置至少 32 个字符的随机密码")
     try:
-        asyncio.run(_run(args.port, token, args.https_origin, args.linx_state, args.camera))
+        asyncio.run(_run(args.port, token, args.https_origin, args.linx_state))
     except KeyboardInterrupt:
         print("模拟控制台已停止")
 
