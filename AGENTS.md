@@ -17,7 +17,7 @@
 
 ## Project
 
-**当前主线（2026-11-01）**：用户已转向手机网页收音/播报和按键 → 腾讯云 `linx-client` → 小车经热点主动 WSS 连云，现场目标不依赖电脑。正式云端已启用实车模式，手机按住前进和松手停车已获用户架空实测确认；语音实车、拔 USB 和断网停车仍待实测。当前发射锁定、摄像头暂停；详见 `docs/云端直连实车.md` 和 `docs/HANDOFF.md`。下文电脑端方案仍可使用。腾讯云与火山云身份相同，不可同时启动灵矽会话。
+**当前主线（2026-11-01）**：手机网页收音/播报和按键 → 腾讯云 `linx-client` → 小车经热点主动 WSS 连云。用户已确认手机按住前进、松手停车，以及拔掉 USB 后仍在线并通过语音让履带转动和停下，现场无需电脑的链路已实测。语音为点击开始、再次点击结束，有音量条和计时。当前发射锁定、摄像头暂停；真实断网停车和当前限速下地面行驶仍未实测，详见 `docs/云端直连实车.md` 和 `docs/HANDOFF.md`。下文电脑端方案仍可使用。腾讯云与火山云身份相同，不可同时启动灵矽会话。
 
 七牛 Hackathon「智能硬件」课题：一辆能发射子弹的 CyberBrick 小车（Mini T 类履带车，主控 Core = ESP32-C3 / MicroPython），接入灵矽（Linx）平台实现语音控制。没有灵矽实体硬件，由 `linx-client/` 在电脑上**模拟一台灵矽设备**（电脑麦克风/扬声器），再通过 Wi-Fi 或 USB 串口控车。
 
@@ -33,6 +33,7 @@
 ```bash
 pip install -r requirements-dev.txt                 # 运行依赖 + pytest
 python -m pytest                                    # 全部测试（无需硬件/网络）
+node --test tests/test_cloud_voice_ui.mjs             # 云端网页录音状态测试（无需麦克风）
 python -m pytest tests/test_executor.py::test_fire_locked   # 单个测试
 
 python -m linx_client activate                      # OTA 激活，打印 6 位激活码，到智控台绑定
