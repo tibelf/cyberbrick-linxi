@@ -73,9 +73,9 @@ def _read_message(stream):
             raise ValueError('不支持的服务端数据帧')
 
 
-def _websocket_upgrade(stream):
+def _websocket_upgrade(stream, server_name=SERVER_NAME):
     key = ubinascii.b2a_base64(os.urandom(16)).strip()
-    request = (b'GET /device HTTP/1.1\r\nHost: ' + SERVER_NAME.encode()
+    request = (b'GET /device HTTP/1.1\r\nHost: ' + server_name.encode()
                + b'\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: '
                + key + b'\r\nSec-WebSocket-Version: 13\r\n\r\n')
     _write_all(stream, request)
@@ -99,6 +99,32 @@ def _websocket_upgrade(stream):
         raise ValueError('WebSocket 响应校验失败')
 
 
+def open_link(ca, token, server_ip=SERVER_IP, server_name=SERVER_NAME):
+    """校验证书、升级 WebSocket 并认证；调用者负责关闭返回的连接。"""
+    gc.collect()
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.load_verify_locations(cadata=ca)
+    raw = socket.socket()
+    stream = None
+    try:
+        raw.settimeout(3)
+        raw.connect((server_ip, 443))
+        stream = ctx.wrap_socket(raw, server_hostname=server_name)
+        _websocket_upgrade(stream, server_name)
+        _send_frame(stream, json.dumps({'type': 'auth', 'token': token}))
+        ready = _read_message(stream)
+        if ready.get('type') != 'ready':
+            raise ValueError('设备认证失败')
+        return stream
+    except Exception:
+        if stream:
+            stream.close()
+        else:
+            raw.close()
+        raise
+
+
 def run(ca, token):
     """调用前连接 Wi-Fi；结束后关闭套接字。不会改变车端配置。"""
     import network
@@ -108,23 +134,9 @@ def run(ca, token):
         raise OSError('小车尚未连接 Wi-Fi')
     ntptime.settime()
     print('网络时间同步成功')
-    gc.collect()
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ctx.verify_mode = ssl.CERT_REQUIRED
-    ctx.load_verify_locations(cadata=ca)
-    raw = socket.socket()
-    stream = None
+    stream = open_link(ca, token)
     try:
-        raw.settimeout(12)
-        raw.connect((SERVER_IP, 443))
-        stream = ctx.wrap_socket(raw, server_hostname=SERVER_NAME)
-        print('服务器证书验证通过')
-        _websocket_upgrade(stream)
-        _send_frame(stream, json.dumps({'type': 'auth', 'token': token}))
-        ready = _read_message(stream)
-        if ready.get('type') != 'ready':
-            raise ValueError('设备认证失败')
-        print('小车已通过云端认证')
+        print('服务器证书验证通过，小车已通过云端认证')
         for i in range(5):
             _send_frame(stream, json.dumps({'type': 'ping', 'id': i}))
             pong = _read_message(stream)
@@ -133,8 +145,5 @@ def run(ca, token):
             print('云端心跳 %d/5 成功' % (i + 1))
             time.sleep_ms(500)
     finally:
-        if stream:
-            stream.close()
-        else:
-            raw.close()
+        stream.close()
         gc.collect()
