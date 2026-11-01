@@ -10,7 +10,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** 可选记住密码，密钥由 Android Keystore 持有；备份已在 Manifest 禁用。 */
+/** 保存自动连接设置；密码用 Android Keystore 加密，备份已禁用。 */
 class ConfigStore(context: Context) {
     private val prefs = context.getSharedPreferences("cloud_connection", Context.MODE_PRIVATE)
     private val alias = "cyberbrick.connection.password"
@@ -25,10 +25,11 @@ class ConfigStore(context: Context) {
             }
         }.getOrDefault("")
         return ConnectionConfig(prefs.getString("server", null) ?: "https://110.40.227.30",
-            prefs.getString("username", null) ?: "car", password) to password.isNotEmpty()
+            prefs.getString("username", null) ?: "car", password) to prefs.getBoolean("remember", true)
     }
     fun save(config: ConnectionConfig, remember: Boolean) {
         val editor = prefs.edit().putString("server", config.server).putString("username", config.username)
+            .putBoolean("remember", remember)
         if (remember && config.password.isNotEmpty()) {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, key())
@@ -37,7 +38,11 @@ class ConfigStore(context: Context) {
         } else editor.remove("password")
         editor.apply()
     }
-    fun forgetPassword() { prefs.edit().remove("password").apply() }
+    fun setRemember(value: Boolean) {
+        val editor = prefs.edit().putBoolean("remember", value)
+        if (!value) editor.remove("password")
+        editor.apply()
+    }
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (store.getKey(alias, null) as? SecretKey)?.let { return it }

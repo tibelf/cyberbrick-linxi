@@ -42,7 +42,7 @@ fun ConnectionScreen(
             trailingIcon={TextButton(onClick={reveal=!reveal}){Text(if(reveal)"隐藏"else"显示",fontSize=11.sp)}})
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
             Checkbox(rememberPassword,onRemember)
-            Text("在本机记住密码",fontSize=13.sp)
+            Text("记住密码，下次自动连接",fontSize=13.sp)
         }
         if(state.connected || busy) {
             OutlinedButton(onClick=onDisconnect,modifier=Modifier.fillMaxWidth().heightIn(min=52.dp),shape=RoundedCornerShape(15.dp)) {

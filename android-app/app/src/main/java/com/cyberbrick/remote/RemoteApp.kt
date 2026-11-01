@@ -27,8 +27,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 fun RemoteApp(vm: RemoteViewModel) {
     val cloud by vm.cloud.state.collectAsStateWithLifecycle()
     val audio by vm.audio.state.collectAsStateWithLifecycle()
-    var tab by rememberSaveable { mutableIntStateOf(2) }
+    var tab by rememberSaveable { mutableIntStateOf(if (vm.initialSettings.second && vm.initialSettings.first.password.isNotEmpty()) 0 else 2) }
     var fireSheet by remember { mutableStateOf(false) }
+    var enterControlAfterConnect by remember { mutableStateOf(false) }
     var server by rememberSaveable { mutableStateOf(vm.initialSettings.first.server) }
     var username by rememberSaveable { mutableStateOf(vm.initialSettings.first.username) }
     // 密码不进入 savedInstanceState，记住密码仅走 Keystore。
@@ -50,7 +51,7 @@ fun RemoteApp(vm: RemoteViewModel) {
         }
     }
     LaunchedEffect(cloud.connected) {
-        if (cloud.connected) { focus.clearFocus(); tab = 0 }
+        if (cloud.connected && enterControlAfterConnect) { focus.clearFocus(); tab = 0; enterControlAfterConnect = false }
     }
     BackHandler(enabled = tab != 0 && !fireSheet) { focus.clearFocus(); tab = 0 }
 
@@ -104,9 +105,9 @@ fun RemoteApp(vm: RemoteViewModel) {
                 })
                 1 -> VoiceScreen(cloud,audio,talk)
                 2 -> ConnectionScreen(cloud,server,username,password,rememberPassword,
-                    onServer={server=it},onUsername={username=it},onPassword={password=it},onRemember={rememberPassword=it;if(!it)vm.forgetPassword()},
-                    onConnect={focus.clearFocus();vm.connect(ConnectionConfig(server,username,password),rememberPassword)},
-                    onDisconnect={vm.audio.stopRecording();vm.audio.flush();vm.cloud.disconnect()},onControl={tab=0})
+                    onServer={server=it},onUsername={username=it},onPassword={password=it},onRemember={rememberPassword=it;vm.setRemember(it)},
+                    onConnect={focus.clearFocus();enterControlAfterConnect=true;vm.connect(ConnectionConfig(server,username,password),rememberPassword)},
+                    onDisconnect={enterControlAfterConnect=false;vm.disconnect()},onControl={tab=0})
             }
         }
     }
