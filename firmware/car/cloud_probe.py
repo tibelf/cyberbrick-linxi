@@ -99,7 +99,7 @@ def _websocket_upgrade(stream, server_name=SERVER_NAME):
         raise ValueError('WebSocket 响应校验失败')
 
 
-def open_link(ca, token, server_ip=SERVER_IP, server_name=SERVER_NAME):
+def open_link(ca, token, server_ip=SERVER_IP, server_name=SERVER_NAME, capabilities=None):
     """校验证书、升级 WebSocket 并认证；调用者负责关闭返回的连接。"""
     gc.collect()
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -112,7 +112,10 @@ def open_link(ca, token, server_ip=SERVER_IP, server_name=SERVER_NAME):
         raw.connect((server_ip, 443))
         stream = ctx.wrap_socket(raw, server_hostname=server_name)
         _websocket_upgrade(stream, server_name)
-        _send_frame(stream, json.dumps({'type': 'auth', 'token': token}))
+        auth = {'type': 'auth', 'token': token}
+        if capabilities:
+            auth['capabilities'] = capabilities
+        _send_frame(stream, json.dumps(auth))
         ready = _read_message(stream)
         if ready.get('type') != 'ready':
             raise ValueError('设备认证失败')

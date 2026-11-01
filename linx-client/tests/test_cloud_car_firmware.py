@@ -1,4 +1,4 @@
-"""验证车端独立拒绝迟到、越界、重复和发射指令。"""
+"""验证车端独立拒绝迟到、越界、重复指令与发射冷却。"""
 
 import importlib.util
 import sys
@@ -37,12 +37,30 @@ def test_device_checks_freshness_speed_duration_and_firing(car):
         ({**motion, "l": 41}, 100),
         ({**motion, "l": True}, 100),
         ({**motion, "ms": 5301}, 100),
-        ({"op": "fire", "ms": 300}, 100),
+        ({"op": "fire", "ms": 501}, 100),
     ]:
         assert not module._apply(command, elapsed)
     assert driver.calls == []
     assert module._apply({"op": "halt"}, 9000)
     assert driver.calls == [("halt",)]
+
+
+def test_device_fire_is_bounded_cooled_down_and_never_replayed(car):
+    module, driver, _ = car
+    clock = [100]
+    module.time = types.SimpleNamespace(ticks_ms=lambda: clock[0], ticks_diff=lambda a, b: a - b,
+                                        ticks_add=lambda a, b: a + b)
+    shot = {"op": "fire", "ms": 500}
+    for bad in ({**shot, "ms": True}, {**shot, "ms": 0}, {**shot, "ms": 501}):
+        assert not module._apply(bad, 100)
+    assert not module._apply(shot, 801)
+    assert driver.calls == []
+    assert module._apply(shot, 100)
+    assert driver.calls == [("arm", 500), ("handle", "fire 500")]
+    clock[0] = 2099
+    assert not module._apply(shot, 100)
+    clock[0] = 2100
+    assert module._apply(shot, 100)
 
 
 def test_device_stops_if_driver_rejects_or_fails(car):

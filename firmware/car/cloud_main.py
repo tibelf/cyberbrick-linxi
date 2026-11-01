@@ -1,4 +1,4 @@
-"""车主动连接云端；断线停车，拒绝过期指令，发射始终锁定。"""
+"""车主动连接云端；断线停车，拒绝过期指令，发射独立限时与冷却。"""
 
 import gc
 import json
@@ -12,6 +12,9 @@ MAX_RTT_MS = 800
 MAX_FAILSAFE_MS = 5300
 MAX_TRACK_SPEED = 40  # 首次云端实车验证先限速；两端都限制
 MAX_TURRET_SPEED = 60
+MAX_FIRE_PULSE_MS = 500
+FIRE_COOLDOWN_MS = 1500
+_fire_ready_at = None  # 保留到下一次实际重启，重连不能绕过冷却
 
 
 def _is_int(value, lo, hi):
@@ -20,6 +23,7 @@ def _is_int(value, lo, hi):
 
 def _apply(message, elapsed_ms, driver=wifi_main):
     """仅接受白名单动作；设备端再次校验参数并先启动硬件看门狗。"""
+    global _fire_ready_at
     op = message.get('op')
     if op == 'halt':  # 停车命令即便迟到仍然安全
         driver.halt()
@@ -48,10 +52,20 @@ def _apply(message, elapsed_ms, driver=wifi_main):
         except Exception:
             driver.halt()
             return False
+    elif op == 'fire':
+        ms = message.get('ms')
+        if not _is_int(ms, 1, MAX_FIRE_PULSE_MS):
+            return False
+        now = time.ticks_ms()
+        if _fire_ready_at is not None and time.ticks_diff(now, _fire_ready_at) < 0:
+            return False
+        command = 'fire %d' % ms
     else:
-        return False  # 包括 fire；设备端也不允许发射
+        return False
     try:
         driver._arm(ms)
+        if op == 'fire':
+            _fire_ready_at = time.ticks_add(time.ticks_ms(), ms + FIRE_COOLDOWN_MS)
         if driver.handle(command) != 'ok':
             driver.halt()
             return False
@@ -133,7 +147,7 @@ def main():
             if not _connect_wifi():
                 raise OSError('Wi-Fi 未连接')
             ntptime.settime()
-            stream = cloud_probe.open_link(ca, token, cfg['ip'], cfg['server_name'])
+            stream = cloud_probe.open_link(ca, token, cfg['ip'], cfg['server_name'], ['fire-v1'])
             print('[云端] 已连接')
             _session(stream)
         except Exception as e:

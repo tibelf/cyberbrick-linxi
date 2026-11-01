@@ -16,6 +16,7 @@ POLL_FRESH_S = 1.5
 COMMAND_AGE_S = 0.4
 COMMAND_TIMEOUT_S = 1.5
 MAX_FAILSAFE_MS = 5300
+MAX_FIRE_PULSE_MS = 500
 
 
 @dataclass
@@ -43,6 +44,7 @@ class CloudCarGateway:
         self.on_status = None
         self.on_disconnect = None
         self.server = None
+        self.fire_supported = False
 
     @property
     def online(self):
@@ -87,6 +89,8 @@ class CloudCarGateway:
                 await ws.close(code=4002, reason="设备已在线")
                 return
             self._device = ws
+            capabilities = auth.get("capabilities", [])
+            self.fire_supported = isinstance(capabilities, list) and "fire-v1" in capabilities
             self._last_nonce = -1
             self._next_number = 0
             owner = True
@@ -142,6 +146,7 @@ class CloudCarGateway:
         finally:
             if owner:
                 self._device = None
+                self.fire_supported = False
                 self._last_poll = 0.0
                 self._fail_all("小车连接中断")
                 if was_online:
@@ -150,8 +155,10 @@ class CloudCarGateway:
                     self.on_disconnect()
 
     async def command(self, op, **args):
-        if op not in ("drive", "turret", "halt", "led"):
+        if op not in ("drive", "turret", "halt", "led", "fire"):
             raise ValueError("不支持的小车指令")
+        if op == "fire" and not self.fire_supported:
+            raise RuntimeError("小车发射程序需要更新")
         if not self.online:
             raise ConnectionError("小车未连接云端")
         if op == "halt":
@@ -173,11 +180,12 @@ class CloudCarGateway:
 
 
 class CloudCarBackend:
-    """只供 executor 调用；发射固定锁定，真实控制还需网页控制者在线。"""
+    """只供 executor 调用；动作需控制者在线，发射还需显式启用与新版车端。"""
 
-    def __init__(self, gateway: CloudCarGateway, control_authorized):
+    def __init__(self, gateway: CloudCarGateway, control_authorized, fire_authorized=lambda: False):
         self.gateway = gateway
         self._control_authorized = control_authorized
+        self._fire_authorized = fire_authorized
 
     async def connect(self):
         pass  # 车主动连接，不阻塞云端服务启动
@@ -202,7 +210,9 @@ class CloudCarBackend:
                          ms=self._int(failsafe_ms, 1, MAX_FAILSAFE_MS))
 
     async def fire(self, pulse_ms):
-        raise RuntimeError("云端实车发射尚未启用")
+        if not self._fire_authorized():
+            raise PermissionError("请先在网页启用发射")
+        await self._send("fire", ms=self._int(pulse_ms, 1, MAX_FIRE_PULSE_MS))
 
     async def halt(self):
         await self._send("halt")

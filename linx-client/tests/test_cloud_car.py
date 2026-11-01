@@ -20,8 +20,8 @@ async def _open_gateway():
     return gateway, f"ws://127.0.0.1:{port}/device"
 
 
-async def _auth(ws, token="a" * 40):
-    await ws.send(json.dumps({"type": "auth", "token": token}))
+async def _auth(ws, token="a" * 40, capabilities=None):
+    await ws.send(json.dumps({"type": "auth", "token": token, "capabilities": capabilities or []}))
     return json.loads(await ws.recv())
 
 
@@ -61,7 +61,7 @@ def test_authenticated_device_and_acknowledged_command():
                 assert not action.done()
                 await _ack(device, command)
                 await action
-                with pytest.raises(RuntimeError, match="发射"):
+                with pytest.raises(PermissionError, match="发射"):
                     await backend.fire(300)
             await asyncio.sleep(0.01)
             assert states == [True, False]
@@ -88,6 +88,43 @@ def test_expired_command_is_not_replayed_on_reconnect():
             async with connect(url) as next_device:
                 await _auth(next_device)
                 assert (await _poll(next_device, 1))["type"] == "noop"
+        finally:
+            await _close(gateway)
+
+    asyncio.run(run())
+
+
+def test_fire_requires_updated_device_and_current_permission():
+    async def run():
+        gateway, url = await _open_gateway()
+        armed = [False]
+        backend = CloudCarBackend(gateway, lambda: True, lambda: armed[0])
+        try:
+            async with connect(url) as old_device:
+                await _auth(old_device)
+                await _poll(old_device, 1)
+                armed[0] = True
+                with pytest.raises(RuntimeError, match="更新"):
+                    await backend.fire(500)
+            await asyncio.sleep(.01)
+            async with connect(url) as device:
+                await _auth(device, capabilities=["fire-v1"])
+                await _poll(device, 1)
+                assert gateway.fire_supported
+                armed[0] = False
+                with pytest.raises(PermissionError, match="启用发射"):
+                    await backend.fire(500)
+                armed[0] = True
+                with pytest.raises(ValueError):
+                    await backend.fire(501)
+                shot = asyncio.create_task(backend.fire(500))
+                await asyncio.sleep(0)
+                command = await _poll(device, 2)
+                assert (command["op"], command["ms"]) == ("fire", 500)
+                await _ack(device, command)
+                await shot
+            await asyncio.sleep(.01)
+            assert not gateway.fire_supported
         finally:
             await _close(gateway)
 
