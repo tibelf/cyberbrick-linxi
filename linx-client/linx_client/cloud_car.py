@@ -103,6 +103,7 @@ class CloudCarGateway:
                             raise ValueError
                         item = self._sent.pop(number, None)
                         if item and not item.result.done():
+                            print(f"[云端车] {item.op} {'已确认' if ok else '被拒绝'}", flush=True)
                             if ok:
                                 item.result.set_result(None)
                             else:
@@ -128,6 +129,7 @@ class CloudCarGateway:
                             self._sent[item.number] = item
                             reply = {"type": "cmd", "nonce": nonce, "id": item.number,
                                      "op": item.op, **item.args}
+                            print(f"[云端车] 已下发 {item.op}", flush=True)
                             break
                         await ws.send(json.dumps(reply, separators=(",", ":")))
                     else:
