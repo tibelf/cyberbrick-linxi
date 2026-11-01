@@ -17,7 +17,7 @@
 
 ## Project
 
-**原生 Android（2026-11-01）**：`android-app/` 使用 Kotlin + Jetpack Compose 与原生 AudioRecord/AudioTrack，复用现有云端 `/control` 协议；不是 WebView，也不在 APK 内存放灵矽 Device-Id 或控制密码。构建与检查：进入 `android-app/` 执行 `./gradlew assembleDebug testDebugUnitTest lintDebug`；详细使用与验证边界见其 README 和 HANDOFF。修改客户端不得绕过云端排程、lease、发射锁定或车端看门狗。
+**原生 Android（2026-11-01）**：`android-app/` 使用 Kotlin + Jetpack Compose 与原生 AudioRecord/AudioTrack，复用云端 `/control`；不是 WebView，也不在 APK 内存放灵矽 Device-Id 或控制密码。0.2.0 默认加密保存连接并启动自动连接，圆形摇杆按约 100 ms 发送 `pad {l,r,lease}`；云端仅保留最新未处理摇杆值并经 `TankExecutor.manual` 限速，停车取消在途及待执行动作。构建与检查：进入 `android-app/` 执行 `./gradlew assembleDebug testDebugUnitTest lintDebug`；详细使用与验证边界见其 README 和 HANDOFF。修改客户端不得绕过云端排程、lease、发射锁定或车端看门狗。
 
 **当前主线（2026-11-01）**：手机网页收音/播报和按键 → 腾讯云 `linx-client` → 小车经热点主动 WSS 连云。用户已确认手机按住前进、松手停车，以及拔掉 USB 后仍在线并通过语音让履带转动和停下，现场无需电脑的链路已实测。语音为点击开始、再次点击结束，有音量条和计时。炮管微调、启用/锁定发射与单发已部署；云端 `--allow-fire`、新版车端 `fire-v1` 与当前页面启用状态共同控制发射，连接/停车/断线后默认锁定。设备应答与用户观察确认炮台上下及空载扳机均有动作；本轮未测试有弹发射。摄像头暂停；真实断网停车和当前限速下地面行驶仍未实测，详见 `docs/云端直连实车.md` 和 `docs/HANDOFF.md`。下文电脑端方案仍可使用。腾讯云与火山云身份相同，不可同时启动灵矽会话。
 
