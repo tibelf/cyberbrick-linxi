@@ -104,6 +104,38 @@ class CloudClientTest {
         assertFalse(client.state.value.armed)
     }
 
+    @Test fun `摇杆持续发送最新差速松手即停且不重放`() {
+        val peer=connect()
+        client.steer(30,12)
+        await {peer.count("pad")>0}
+        assertEquals("current-lease",peer.last("pad").getString("lease"))
+        assertEquals(30,peer.last("pad").getInt("l"))
+        assertEquals(12,peer.last("pad").getInt("r"))
+        client.steer(40,-26)
+        await {peer.last("pad").getInt("l")==40 && peer.last("pad").getInt("r")==-26}
+        client.steer(0,0)
+        await {peer.count("stop")>0}
+        val afterStop=peer.count("pad")
+        Thread.sleep(250)
+        assertEquals(afterStop,peer.count("pad"))
+        assertThrows(IllegalArgumentException::class.java) {client.steer(41,0)}
+    }
+
+    @Test fun `摇杆切后台后不会恢复上一次力度`() {
+        val first=connect()
+        client.steer(32,28)
+        await {first.count("pad")>0}
+        client.setForeground(false)
+        await {first.count("stop")>0}
+        val second=Peer()
+        server.enqueue(MockResponse().withWebSocketUpgrade(second))
+        client.setForeground(true)
+        await {client.state.value.canControl && second.count("presence")>0}
+        Thread.sleep(250)
+        assertEquals(0,second.count("pad"))
+        assertFalse(client.state.value.armed)
+    }
+
     @Test fun `单发须云端确认启用且快速连点不排队`() {
         val peer=connect()
         client.fire()
@@ -186,6 +218,22 @@ class CloudClientTest {
         assertTrue(client.state.value.error!!.contains("已有控制端"))
         Thread.sleep(1200)
         assertEquals(1,server.requestCount)
+    }
+
+    @Test fun `快速返回时旧会话未释放可自动重试一次`() {
+        connect()
+        client.setForeground(false)
+        val occupied=object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket,text: String) {webSocket.close(4002,"旧会话关闭中")}
+        }
+        server.enqueue(MockResponse().withWebSocketUpgrade(occupied))
+        val next=Peer()
+        server.enqueue(MockResponse().withWebSocketUpgrade(next))
+        client.setForeground(true)
+        await(timeoutMs=4000) {client.state.value.canControl && next.count("presence")>0}
+        assertEquals(3,server.requestCount)
+        assertFalse(client.state.value.armed)
+        assertEquals(0,next.count("pad"))
     }
 
     @Test fun `云端关闭连接后自动重连且丢弃原动作和发射启用`() {

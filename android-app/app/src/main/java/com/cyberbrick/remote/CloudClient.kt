@@ -83,11 +83,16 @@ class CloudClient(
     private var generation = 0
     private var foreground = true
     private var retryCount = 0
+    private var busyRetryBudget = 0
     private var retry: ScheduledFuture<*>? = null
     private var opening: ScheduledFuture<*>? = null
     private var lease: String? = null
     private var leaseAt = Long.MIN_VALUE
-    private var manual: String? = null
+    private sealed interface Manual {
+        data class Direction(val value: String) : Manual
+        data class Tracks(val left: Int, val right: Int) : Manual
+    }
+    private var manual: Manual? = null
     private var micLive = false
     private var shotUntil = 0L
     private val silence = ByteArray(640).toByteString()
@@ -100,14 +105,14 @@ class CloudClient(
         }, 20, 20, TimeUnit.MILLISECONDS)
         executor.scheduleWithFixedDelay({
             synchronized(lock) {
-                manual?.let { direction ->
-                    if (canAct()) command("drive", "direction" to direction)
+                manual?.let { action ->
+                    if (canAct()) sendManual(action)
                     else stopLocked("控制连接过期，已停止")
                 }
                 val remaining = (shotUntil - now()).coerceAtLeast(0)
                 if (remaining != mutable.value.cooldownMs) mutable.update { it.copy(cooldownMs = remaining) }
             }
-        }, 100, 120, TimeUnit.MILLISECONDS)
+        }, 100, 100, TimeUnit.MILLISECONDS)
     }
 
     fun connect(config: ConnectionConfig) {
@@ -162,14 +167,20 @@ class CloudClient(
     private fun current(id: Int) = synchronized(lock) { id == generation && foreground }
 
     private fun finish(code: Int, id: Int) {
+        val retryOwnClosing = synchronized(lock) {
+            if (id == generation && code == 4002 && busyRetryBudget > 0) {
+                busyRetryBudget--
+                true
+            } else false
+        }
         val reason = when (code) {
             4001 -> "控制密码验证失败"
-            4002 -> "已有控制端在线，请先断开网页或其他手机"
+            4002 -> if (retryOwnClosing) "正在恢复连接，请稍候" else "已有控制端在线，请先断开网页或其他手机"
             4008 -> "控制连接超时，正在重连"
             1000 -> "连接已关闭"
             else -> "云端连接中断，正在重连"
         }
-        failed(id, reason, code !in listOf(4001, 4002))
+        failed(id, reason, code !in listOf(4001, 4002) || retryOwnClosing)
     }
 
     private fun failed(id: Int, reason: String, retryable: Boolean) {
@@ -203,7 +214,7 @@ class CloudClient(
             if (id != generation || !foreground) return
             when (msg.optString("type")) {
                 "ready" -> {
-                    opening?.cancel(false); retryCount = 0
+                    opening?.cancel(false); retryCount = 0; busyRetryBudget = 0
                     mutable.update { it.copy(phase = LinkPhase.CONNECTED, realCar = msg.optString("mode") == "真实小车",
                         carOnline = msg.optBoolean("car_online"), linx = msg.optString("linx", "offline"),
                         message = "云端已连接", error = null) }
@@ -286,12 +297,38 @@ class CloudClient(
         return ws.send(frame)
     }
 
+    private fun sendManual(action: Manual): Boolean = when (action) {
+        is Manual.Direction -> command("drive", "direction" to action.value)
+        is Manual.Tracks -> command("pad", "l" to action.left, "r" to action.right)
+    }
+
     fun drive(direction: String) = synchronized(lock) {
         require(direction in listOf("forward", "backward", "left", "right"))
         if (!canAct()) { report("小车或控制连接尚未就绪"); return@synchronized }
-        manual = direction
-        command("drive", "direction" to direction)
+        manual = Manual.Direction(direction)
+        sendManual(manual!!)
         mutable.update { it.copy(motion = when (direction) { "forward" -> "前进中"; "backward" -> "后退中"; "left" -> "左转中"; else -> "右转中" }, error = null) }
+    }
+
+    /** 拖动时只更新最新力度；固定节奏续传，松手立即发送停车。 */
+    fun steer(left: Int, right: Int) = synchronized(lock) {
+        require(left in -40..40 && right in -40..40)
+        if (left == 0 && right == 0) {
+            if (manual != null) stopLocked("已发送停止 · 发射已锁定")
+            return@synchronized
+        }
+        if (!canAct()) {
+            if (manual != null) stopLocked("控制连接过期，已停止")
+            else if (mutable.value.error == null) report("小车或控制连接尚未就绪")
+            return@synchronized
+        }
+        val first = manual !is Manual.Tracks
+        val action = Manual.Tracks(left, right)
+        manual = action
+        if (first) {
+            sendManual(action)
+            mutable.update { it.copy(motion = "摇杆操控中", error = null) }
+        }
     }
 
     fun stop() = synchronized(lock) { stopLocked("已发送停止 · 发射已锁定") }
@@ -343,14 +380,17 @@ class CloudClient(
         synchronized(lock) {
             if (foreground == value) return
             foreground = value
-            if (!value) endConnection("已暂停，返回 App 后重连")
+            if (!value) {
+                if (desired != null && mutable.value.phase != LinkPhase.DISCONNECTED) busyRetryBudget = 2
+                endConnection("已暂停，返回 App 后重连")
+            }
             else desired?.let { open(it) }
         }
         if (!value) onLost()
     }
 
     fun disconnect() {
-        synchronized(lock) { desired = null; retryCount = 0; endConnection("连接已断开") }
+        synchronized(lock) { desired = null; retryCount = 0; busyRetryBudget = 0; endConnection("连接已断开") }
         onLost()
     }
 
