@@ -89,7 +89,7 @@ def _connect_wifi():
     return False
 
 
-def _session(stream):
+def _session(stream, max_rounds=None):
     nonce = 0
     last_id = 0
     while nonce < 2**31 - 1:
@@ -107,8 +107,11 @@ def _session(stream):
             last_id = number
             ok = _apply(msg, elapsed)
             cloud_probe._send_frame(stream, json.dumps({'type': 'ack', 'id': number, 'ok': ok}))
+            print('[云端] 指令%s: %s' % ('已执行' if ok else '已拒绝', msg.get('op')))
         elif msg.get('type') != 'noop':
             raise ValueError('云端应答类型无效')
+        if max_rounds is not None and nonce >= max_rounds:
+            return
         time.sleep_ms(150)
 
 
