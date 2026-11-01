@@ -2,11 +2,11 @@
 
 > 每个 agent 收工前更新本文件并提交。按时间倒序记录，最新的写在最上面。规则见 `AGENTS.md`「交接协议」。
 
-**最后更新**：2026-11-01 · Codex（原生 Android APK 已生成并交付下载；网络模块真实云端通过，待手机安装确认）；历史功能记录见下文
+**最后更新**：2026-11-01 · Codex（原生 Android APK 已生成并交付下载；网络模块真实云端通过，手机已安装启动，待 App 语音确认）；历史功能记录见下文
 
 ## 当前状态
 
-- **原生 Android APK 已生成**：用户明确要求开发 APK，已按现有设计实现 `android-app/`，Kotlin + Jetpack Compose，含真实连接、方向按住/松手、语音收放音、炮台微调、发射启用与单发；`assembleDebug` 完整界面编译通过。10 项本地 WSS 协议测试、Lint（0 错误 / 9 个版本和风格建议）、APK v2 签名及受保护下载已通过；同一网络模块在 JVM 连接真实云端，收到真实小车在线和 16k 语音格式。手机安装与 App 内真实语音/动作尚未验证，不把原网页实测当作 App 实测。
+- **原生 Android APK 已生成**：用户明确要求开发 APK，已按现有设计实现 `android-app/`，Kotlin + Jetpack Compose，含真实连接、方向按住/松手、语音收放音、炮台微调、发射启用与单发；`assembleDebug` 完整界面编译通过。10 项本地 WSS 协议测试、Lint（0 错误 / 9 个版本和风格建议）、APK v2 签名及受保护下载已通过；同一网络模块在 JVM 连接真实云端，收到真实小车在线和 16k 语音格式。用户已确认手机安装成功并能看到连接界面；App 内真实连接、语音/动作仍待手机确认，不把原网页实测当作 App 实测。
 - **Android 先设计**：用户已改用 `claude-design`。可编辑设计位于 `designs/cyberbrick-android/project/`，5 个 390×844 画板，覆盖遥控、语音、单发、连接和离线状态；编辑器已启动，可用技能脚本 `open` 重新取得当前本地地址。结构检查 `problems: 0`，未进行浏览器/渲染验证；这是设计稿，不是已实现的原生 App 或 APK。
 - **当前云端主线已打通**：正式腾讯云服务连接实车，用户确认手机按键松手停车、新版点击录音与回复，以及拔掉电脑 USB 后语音驱动履带并停下。现场链路为手机网页 → 腾讯云灵矽与排程 → 小车主动连云；当前卸弹架空、速度上限 40、摄像头暂停。真实断网停车和地面行驶仍未在这套部署下实测。
 - **云端炮台与单发已部署**：网页有每次 200 ms 上/下微调、启用/锁定发射与单发。服务端已启用 `--allow-fire`，新版车端上报 `fire-v1`，每次连接仍默认锁定；停车、断线/切后台重新锁定。空载测试有两次 `turret` 与一次 `fire` 的设备成功应答及随后的 `halt`，用户确认「炮台上下都有动作，扳机也动了」；未做有弹发射。
@@ -16,7 +16,7 @@
 
 ## 进行中
 
-- **（2026-11-01）APK 交付与真实网络模块验证**：Debug APK 位于 `dist/cyberbrick-v0.1.0.apk`（忽略提交），12,621,060 字节，SHA-256 `a043f5ff0807dd4c2b71decdbffd809e578a4e12c752240d26fb3202f045200d`。已复制到腾讯云 `/srv/cyberbrick-downloads/`，现有 HTTPS server 引入仓库下载片段；备份原 Nginx 后 `nginx -t` 通过并仅 reload，控制服务未重启。`https://110.40.227.30/android/cyberbrick-v0.1.0.apk` 未认证 HTTP 401、原密码认证 HTTP 200、TLS 正常且下载哈希一致。以临时 Java 程序在 JVM 调用本次编译的同一 `CloudClient`，私有密码仅经 stdin/内存，成功完成真实云端认证，收到灵矽 connected、真实小车在线、16k PCM、发射未启用；只收状态/静音/保活及退出停止，无运动或发射。用户已收到下载链接并被请确认安装界面；截至记录尚无手机安装反馈。
+- **（2026-11-01）APK 交付与真实网络模块验证**：Debug APK 位于 `dist/cyberbrick-v0.1.0.apk`（忽略提交），12,621,060 字节，SHA-256 `a043f5ff0807dd4c2b71decdbffd809e578a4e12c752240d26fb3202f045200d`。已复制到腾讯云 `/srv/cyberbrick-downloads/`，现有 HTTPS server 引入仓库下载片段；备份原 Nginx 后 `nginx -t` 通过并仅 reload，控制服务未重启。`https://110.40.227.30/android/cyberbrick-v0.1.0.apk` 未认证 HTTP 401、原密码认证 HTTP 200、TLS 正常且下载哈希一致。以临时 Java 程序在 JVM 调用本次编译的同一 `CloudClient`，私有密码仅经 stdin/内存，成功完成真实云端认证，收到灵矽 connected、真实小车在线、16k PCM、发射未启用；只收状态/静音/保活及退出停止，无运动或发射。用户已收到下载链接并被请确认安装界面；用户随后确认「已安装，能看到连接界面」，已请其在 App 连接并用“你好”测试原生收放音；尚无语音测试结果。
 
 - **（2026-11-01）Android 协议与兼容检查通过**：`./gradlew testDebugUnitTest lintDebug assembleDebug` 通过，10 项测试均为本地 TLS/WSS 假云端，涵盖认证、租约过期、单发锁定/冷却、PCM/静音、半双工、前后台及连接关闭后的重连不重放和未知 CA 拒绝；Lint 0 错误 / 9 个版本或风格建议。修正 Android 8.0 导航栏资源，定时任务改为固定延迟避免进程恢复时补发，并显式禁止 Android 12+ 备份/迁移。用户开启调试且重新插线后 ADB 仍为空；模拟器 API 37.2 在软件/宿主渲染两条路径均于系统启动时崩溃，未完成 App 启动验证。Debug APK 下载和公网核验已完成，见上条。
 
@@ -187,7 +187,7 @@
 
 ## 下一步（按优先级）
 
-- **Android 当前优先**：等待用户确认 APK 能安装并显示连接界面；下载与哈希已核验，不必重复。ADB 出现设备后可执行 `adb install -r android-app/app/build/outputs/apk/debug/app-debug.apk`。先验证连接、界面与语音回复；真实运动/扳机前重新确认卸弹架空。不要因 USB 未识别而反复要求用户插拔。
+- **Android 当前优先**：用户已确认 APK 安装启动和连接界面。当前等待 App 原生连接与“你好”语音往返反馈；下载与哈希已核验，不必重复。ADB 出现设备后可执行 `adb install -r android-app/app/build/outputs/apk/debug/app-debug.apk`。先验证连接、界面与语音回复；真实运动/扳机前重新确认卸弹架空。不要因 USB 未识别而反复要求用户插拔。
 
 - **Android 设计评审优先**：用户已改用 claude-design，五屏稿位于 `designs/cyberbrick-android/project/`，不再等待 baoyu-design。用 `node /Users/pwxiao/.codex/skills/claude-design/scripts/artifact.mjs open designs/cyberbrick-android` 取得编辑器地址；先处理用户对具体画板的反馈。修订前读取对应源文件，因为用户可直接编辑。原生开发尚未开始，后续沿用既有手机→云端→小车路径；录音须用户点击并授权后才开始，设计中收音画板只是场景示例。
 
@@ -249,7 +249,7 @@
 
 ## 已验证 / 未验证
 
-2026-11-01 Android：完整 Debug 构建、10 项本地 WSS 协议测试、Lint（0 错误 / 9 警告）与 APK v2 签名通过；minSdk 26、targetSdk 36、包名 `com.cyberbrick.remote`、版本 0.1.0，约 13 MB。APK 下载经公网 TLS/认证与哈希核验；同一网络模块在 JVM 的真实云端认证和状态接收通过。未在手机或模拟器成功安装启动，手机原生音频和实际控车尚未验证，不能把 JVM 网络验证、协议测试或旧网页结果当作手机 App 实测。
+2026-11-01 Android：完整 Debug 构建、10 项本地 WSS 协议测试、Lint（0 错误 / 9 警告）与 APK v2 签名通过；minSdk 26、targetSdk 36、包名 `com.cyberbrick.remote`、版本 0.1.0，约 13 MB。APK 下载经公网 TLS/认证与哈希核验；同一网络模块在 JVM 的真实云端认证和状态接收通过。用户已确认手机安装启动并显示连接界面；模拟器仍未启动成功，手机原生音频和实际控车尚未验证，不能把 JVM 网络验证、协议测试或旧网页结果当作手机 App 实测。
 
 2026-11-01 Android 设计稿：claude-design `list` 无已登记设计系统；`check designs/cyberbrick-android` 返回 **boardCount 5 / problems 0**。检查只覆盖文件格式与引用，未验证脚本运行、布局呈现或原生系统行为。未生成 APK、未部署设计稿到公网、未启用麦克风或连接真实控车。
 
@@ -384,6 +384,8 @@
 | 引脚映射 | ✅ 已从遥控器和车的 `rc_config` 读出（两者相同），`BOOTSTRAP` 已按此重写（见「已确认事实」）；❓ 哪条是左/右、方向，还要实车验证 |
 
 ## 已确认事实
+
+- **2026-11-01 Android 安装**：用户通过受原密码保护的下载入口安装 0.1.0 测试 APK，确认「已安装，能看到连接界面」。ADB 始终未识别手机，安装由用户在手机完成；尚未确认 App 内云端连接与音频。
 
 - **2026-11-01 Android**：用户明确要求「开发 APK，使用 Android 原生开发」，随后说「已经链接上真机了」。电脑端 ADB 尚未识别设备；用户随后确认已开启并允许调试、也已重新插好数据线，但 ADB 仍无设备，无法声明真机可安装。
 

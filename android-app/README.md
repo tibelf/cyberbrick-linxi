@@ -37,4 +37,4 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 `assembleDebug`、10 项本地 WSS 协议测试与 `lintDebug` 已通过；Lint 0 错误、9 个版本/风格建议。APK 的 v2 签名验证通过，约 13 MB，Android 8.0+。协议测试涵盖认证、租约过期停车、单发锁定与冷却、PCM 帧与静音、回复停麦、后台/断线重连不重放和未知 CA 拒绝，均不连接实车。
 
-受原密码保护的 APK 下载已核验 HTTP 200、TLS 和 SHA-256 一致，未认证为 HTTP 401；同一 `CloudClient` 已在 JVM 连上真实云端，收到小车在线、灵矽 connected 与 16k PCM 格式。真机安装、原生麦克风/扬声器、实际语音和控车仍待实测。用户已开启调试并重新插线，但 Mac 的 ADB 暂未识别手机；本机 API 37.2 模拟器两种渲染模式均在系统启动时崩溃，未用于声称 App 启动成功。
+受原密码保护的 APK 下载已核验 HTTP 200、TLS 和 SHA-256 一致，未认证为 HTTP 401；同一 `CloudClient` 已在 JVM 连上真实云端，收到小车在线、灵矽 connected 与 16k PCM 格式。用户已确认手机安装启动并显示连接界面；原生麦克风/扬声器、实际语音和控车仍待实测。用户已开启调试并重新插线，但 Mac 的 ADB 暂未识别手机；本机 API 37.2 模拟器两种渲染模式均在系统启动时崩溃，未用于声称 App 启动成功。
