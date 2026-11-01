@@ -15,7 +15,6 @@
     .pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
     .pad button { min-height: 65px; touch-action: none; user-select: none; background: #dae9ff; }
     .pad button:disabled { opacity: .5; } .pad .stop { background: #df3030; color: white; }
-    .view { min-height: 110px; display: grid; place-items: center; background: #e5e8eb; color: #4a5562; }
     .voice button { margin-right: .5rem; background: #dae9ff; touch-action: none; }
     .voice button:disabled { opacity: .5; }
   </style>
@@ -23,7 +22,7 @@
 <body>
 <main>
   <h1>小车云端控制测试</h1>
-  <p>模拟模式：不会连接实车或发射。车载画面尚未接入。</p>
+  <p>模拟模式：不会连接实车或发射。</p>
   <section>
     <form id="login">
       <label for="token">控制密码</label>
@@ -32,7 +31,6 @@
     </form>
     <p id="status" role="status">未连接</p>
   </section>
-  <section><div class="view">车载摄像头尚未连接</div></section>
   <section class="voice">
     <p id="voice-status" role="status">灵矽语音尚未接入</p>
     <button id="enable-audio" disabled>启用语音</button>
