@@ -5,6 +5,7 @@
 
 import asyncio
 import json
+import time
 from collections import deque
 from typing import Callable
 
@@ -17,6 +18,7 @@ from .identity import Identity
 from .mcp import McpServer
 
 Endpoint = tuple[str, str]  # (ws_url, token)
+STABLE_CONNECTION_S = 30
 
 
 class LinxSession:
@@ -59,15 +61,23 @@ class LinxSession:
     async def run_forever(self):
         backoff = 1
         while not self._closing:
+            started = time.monotonic()
+            error = None
             try:
                 await self._run_once()
-                backoff = 1
             except (OSError, WebSocketException, asyncio.TimeoutError, RuntimeError) as e:
-                if self._closing:
-                    break
-                print(f"[linx] 连接断开：{e!r}，{backoff}s 后重连")
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 30)
+                error = e
+            if self._closing:
+                break
+            # 平台可能用正常关闭码挤掉重复设备；正常结束也要退避，不能每秒不停重连。
+            if time.monotonic() - started >= STABLE_CONNECTION_S:
+                backoff = 1
+            if error:
+                print(f"[linx] 连接断开：{error!r}，{backoff}s 后重连")
+            else:
+                print(f"[linx] 会话结束，{backoff}s 后重连")
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 30)
 
     async def close(self):
         self._closing = True
