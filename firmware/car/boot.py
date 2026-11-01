@@ -7,7 +7,8 @@
 # This file is executed on every boot (including wake-boot from deepsleep)
 #
 # 在原厂 boot.py（firmware/backup-car/boot.py）基础上加了模式选择：
-#   有 /wifi.json 且开机时没按住板载按键（Pin9）→ Wi-Fi 控车（/app/wifi_main.py）
+#   有 /wifi.json 且开机时没按住板载按键（Pin9）→ 联网模式
+#   同时有 /cloud.json → 小车主动连云（/app/cloud_main.py）；否则继续局域网 Wi-Fi 模式
 #   否则，或 Wi-Fi 模式启动失败 → 原厂遥控程序
 # 恢复原厂：python -m linx_client wifi-setup --uninstall
 
@@ -36,12 +37,24 @@ def _wifi_mode():
     return machine.Pin(9, machine.Pin.IN).value() == 1  # 按下为 0
 
 
+def _cloud_mode():
+    try:
+        os.stat('/cloud.json')
+        return True
+    except OSError:
+        return False
+
+
 if _wifi_mode():
     try:
-        import wifi_main
-        wifi_main.main()
+        if _cloud_mode():
+            import cloud_main
+            cloud_main.main()
+        else:
+            import wifi_main
+            wifi_main.main()
     except Exception as e:
-        print('[boot] Wi-Fi 模式失败，回到原厂遥控：', e)
+        print('[boot] 联网模式失败，回到原厂遥控：', e)
 
 import rc_main
 

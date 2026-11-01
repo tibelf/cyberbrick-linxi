@@ -127,8 +127,9 @@ def cmd_wifi_setup(args):
     try:
         if args.uninstall:
             put_file(repl, "/boot.py", (fw / "backup-car" / "boot.py").read_bytes())
-            remove_file(repl, "/wifi.json")
-            remove_file(repl, "/app/wifi_main.py")
+            for path in ("/wifi.json", "/app/wifi_main.py", "/cloud.json", "/cloud-ca.pem",
+                         "/app/cloud_main.py", "/app/cloud_probe.py"):
+                remove_file(repl, path)
             print("✅ 已恢复原厂程序")
         else:
             if not args.code_only:

@@ -231,6 +231,7 @@ def test_wifi_setup_uninstall_restores_factory_boot(fake_car):
     assert any("open('/boot.py'" in c for c in repl.codes)
     assert any("os.remove('/wifi.json')" in c for c in repl.codes)
     assert any("os.remove('/app/wifi_main.py')" in c for c in repl.codes)
+    assert any("os.remove('/cloud.json')" in c for c in repl.codes)
 
 
 def test_check_car_code_rejects_syntax_error(tmp_path):

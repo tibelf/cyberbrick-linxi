@@ -66,3 +66,39 @@ def test_device_rejects_repeated_action_id(car):
         module._session(object())
     assert driver.calls == [("arm", 400), ("handle", "drive 20 20 400")]
     assert len(sent) == 3  # 第一轮 poll/ack，第二轮 poll；没有执行第二次
+
+
+@pytest.mark.parametrize(
+    "wifi,cloud,button,expected",
+    [(True, True, 1, "cloud"), (True, False, 1, "wifi"),
+     (True, True, 0, "rc"), (False, True, 1, "rc")],
+)
+def test_boot_mode_preserves_original_remote_control(monkeypatch, wifi, cloud, button, expected):
+    class Selected(BaseException):
+        pass
+
+    def select(name):
+        def run():
+            raise Selected(name)
+        return run
+
+    fake_os = types.ModuleType("os")
+    def stat(path):
+        if (path == "/wifi.json" and wifi) or (path == "/cloud.json" and cloud):
+            return ()
+        raise OSError("not found")
+    fake_os.stat = stat
+    fake_machine = types.ModuleType("machine")
+    fake_machine.Pin = type("Pin", (), {"IN": 0, "__init__": lambda self, *args: None,
+                                        "value": lambda self: button})
+    bbl = types.ModuleType("bbl_product")
+    bbl.set_app_name = bbl.set_app_version = lambda *args: None
+    for name, fake in {"os": fake_os, "machine": fake_machine, "bbl_product": bbl,
+                       "cloud_main": types.SimpleNamespace(main=select("cloud")),
+                       "wifi_main": types.SimpleNamespace(main=select("wifi")),
+                       "rc_main": types.SimpleNamespace(main=select("rc"))}.items():
+        monkeypatch.setitem(sys.modules, name, fake)
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    source = (Path(__file__).resolve().parents[2] / "firmware/car/boot.py").read_text()
+    with pytest.raises(Selected, match=expected):
+        exec(compile(source, "boot.py", "exec"), {})
