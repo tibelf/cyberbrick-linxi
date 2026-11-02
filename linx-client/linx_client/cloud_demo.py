@@ -1,0 +1,421 @@
+"""云控车入口；默认模拟，可显式启用受保护的实车连接。"""
+
+import argparse
+import asyncio
+import json
+import os
+import secrets
+import time
+from collections import deque
+from pathlib import Path
+from urllib.parse import urlsplit
+
+from websockets.asyncio.server import serve
+from websockets.datastructures import Headers
+from websockets.exceptions import ConnectionClosed
+from websockets.http11 import Response
+
+from .tank import MockBackend, TankExecutor
+
+PAGE = Path(__file__).with_name("web") / "cloud-demo.html"
+WORKLET = Path(__file__).with_name("web") / "microphone-worklet.js"
+AUTH_TIMEOUT_S = 5
+LEASE_INTERVAL_S = 0.4
+LEASE_MAX_AGE_S = 0.9
+CONTROLLER_TIMEOUT_S = 1.5
+
+
+class CloudDemo:
+    """网页和动作入口；发射默认锁定，需本次控制会话主动启用。"""
+
+    def __init__(self, tank: TankExecutor, token: str, gateway=None, fire_allowed=False):
+        if len(token) < 32:
+            raise ValueError("请设置至少 32 个字符的随机 CAR_DEMO_TOKEN")
+        self.tank = tank
+        self._token = token
+        self._controller = None
+        self._outgoing = None
+        self.session = None
+        self.audio_format = None
+        self.activation_code = None
+        self.linx_state = "offline"
+        self.gateway = gateway
+        self._leases = deque(maxlen=4)
+        self._last_presence = 0.0
+        self._fire_allowed = fire_allowed
+        self._armed = False
+        self._next_shot_at = 0.0
+        self.tank.fire_enabled = False
+
+    def fire_status(self):
+        if not self._fire_allowed:
+            reason = "云端尚未启用发射"
+        elif self.gateway and not self.gateway.online:
+            reason = "等待小车上线"
+        elif self.gateway and not self.gateway.fire_supported:
+            reason = "小车程序待更新，暂不能发射"
+        else:
+            reason = "已启用：每次点击发射一发" if self._armed else "发射已锁定，启用后可单发"
+            return {"available": True, "armed": self._armed, "reason": reason}
+        return {"available": False, "armed": False, "reason": reason}
+
+    def _set_armed(self, on):
+        self._armed = on
+        self.tank.fire_enabled = on
+        self.publish({"type": "fire_state", **self.fire_status()})
+
+    def fire_authorized(self):
+        return (self._armed and self._controller is not None and self.fire_status()["available"]
+                and (not self.gateway or self.controller_authorized()))
+
+    def controller_authorized(self):
+        return self._controller is not None and time.monotonic() - self._last_presence < CONTROLLER_TIMEOUT_S
+
+    def on_car_status(self, online):
+        if not online:
+            self._set_armed(False)
+        self.publish({"type": "car_status", "online": online})
+        self.publish({"type": "fire_state", **self.fire_status()})
+
+    def _valid_lease(self, value):
+        return isinstance(value, str) and any(
+            secrets.compare_digest(value, token) and time.monotonic() - issued < LEASE_MAX_AGE_S
+            for token, issued in self._leases
+        )
+
+    async def _lease_loop(self):
+        while True:
+            token = secrets.token_hex(8)
+            self._leases.append((token, time.monotonic()))
+            self.publish({"type": "lease", "id": token})
+            await asyncio.sleep(LEASE_INTERVAL_S)
+
+    async def _controller_watchdog(self, ws):
+        while True:
+            await asyncio.sleep(0.2)
+            if not self.controller_authorized():
+                await ws.close(code=4008, reason="控制连接超时")
+                return
+
+    @staticmethod
+    def _http(connection, request):
+        path = urlsplit(request.path).path
+        if path == "/control":
+            return None
+        headers = Headers([("Content-Type", "text/html; charset=utf-8"),
+                           ("Cache-Control", "no-store"),
+                           ("X-Content-Type-Options", "nosniff"),
+                           ("X-Frame-Options", "DENY")])
+        if path == "/":
+            return Response(200, "OK", headers, PAGE.read_bytes())
+        if path == "/microphone-worklet.js":
+            script_headers = Headers([("Content-Type", "text/javascript; charset=utf-8"),
+                                      ("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff")])
+            return Response(200, "OK", script_headers, WORKLET.read_bytes())
+        return Response(404, "Not Found", headers, b"not found")
+
+    def publish(self, message):
+        """音频和事件按顺序发给当前控制者；网络积压时断开而不是播放过时语音。"""
+        if self._outgoing is None:
+            return
+        if self._outgoing.full():
+            asyncio.create_task(self._controller.close(code=1013, reason="网络缓冲已满"))
+            return
+        data = message if isinstance(message, bytes) else json.dumps(message, ensure_ascii=False)
+        self._outgoing.put_nowait(data)
+
+    def on_audio_format(self, audio_format):
+        self.audio_format = audio_format
+        self.publish({"type": "audio_format", **audio_format})
+
+    def on_audio_flush(self):
+        self.publish({"type": "audio_flush"})
+
+    def on_linx_event(self, event):
+        if event.get("type") == "conn":
+            self.linx_state = event.get("state", "offline")
+            if self.linx_state != "connected":
+                self.audio_format = None
+            else:
+                self.on_activation(None)
+        if event.get("type") in ("conn", "user", "bot", "speaking"):
+            self.publish({"type": "linx_event", "event": event})
+
+    def on_activation(self, code):
+        self.activation_code = code
+        self.publish({"type": "activation", "code": code})
+
+    @staticmethod
+    async def _send_loop(ws, queue):
+        while True:
+            await ws.send(await queue.get())
+
+    async def start(self, port: int, https_origin: str | None = None):
+        # 始终只监听回环地址；反向代理需要另行配置 HTTPS 和访问保护。
+        origins = [f"http://localhost:{port}", f"http://127.0.0.1:{port}"]
+        if https_origin:
+            parsed = urlsplit(https_origin)
+            if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
+                    or parsed.path or parsed.query or parsed.fragment or https_origin.endswith("/")):
+                raise ValueError("代理来源必须是完整的 HTTPS 来源，例如 https://car.example.com")
+            try:
+                parsed.port  # 检查端口是否合法
+            except ValueError as exc:
+                raise ValueError("代理来源端口不合法") from exc
+            origins.append(https_origin)
+        self.server = await serve(self._handle, "127.0.0.1", port, origins=origins,
+                                  process_request=self._http, max_size=4096, max_queue=8,
+                                  ping_interval=10, ping_timeout=10, close_timeout=2)
+
+    async def _handle(self, ws):
+        owner = False
+        sender = None
+        leases = None
+        watchdog = None
+        manual_task = None
+        pending_manual = None
+
+        async def run_manual():
+            """只保留最新摇杆值，避免慢网络把旧方向排队到松手之后。"""
+            nonlocal pending_manual
+            while pending_manual is not None:
+                left, right, lease, received = pending_manual
+                pending_manual = None
+                if (time.monotonic() - received >= 0.4
+                        or (self.gateway and (not self._valid_lease(lease) or not self.controller_authorized()))):
+                    continue
+                try:
+                    await self.tank.manual(left, right)
+                except asyncio.CancelledError:
+                    raise
+                except (ValueError, RuntimeError, OSError) as exc:
+                    self.publish({"type": "error", "message": str(exc)})
+
+        async def cancel_manual():
+            nonlocal manual_task, pending_manual
+            pending_manual = None
+            if manual_task and not manual_task.done():
+                manual_task.cancel()
+                await asyncio.gather(manual_task, return_exceptions=True)
+            manual_task = None
+
+        try:
+            try:
+                raw = await asyncio.wait_for(ws.recv(), AUTH_TIMEOUT_S)
+                auth = json.loads(raw)
+                valid = (isinstance(auth, dict) and auth.get("type") == "auth"
+                         and isinstance(auth.get("token"), str)
+                         and secrets.compare_digest(auth["token"], self._token))
+            except (TimeoutError, ValueError, TypeError):
+                valid = False
+            if not valid:
+                await ws.close(code=4001, reason="验证失败")
+                return
+            if self._controller is not None:
+                await ws.close(code=4002, reason="已有控制者")
+                return
+            self._controller = ws
+            self._outgoing = asyncio.Queue(maxsize=128)
+            self._leases.clear()
+            self._last_presence = time.monotonic()
+            owner = True
+            mode = "真实小车" if self.gateway else "模拟小车"
+            await ws.send(json.dumps({"type": "ready", "mode": mode, "linx": self.linx_state,
+                                      "fire": self.fire_status(),
+                                      "car_online": self.gateway.online if self.gateway else True},
+                                     ensure_ascii=False))
+            sender = asyncio.create_task(self._send_loop(ws, self._outgoing))
+            if self.gateway:
+                leases = asyncio.create_task(self._lease_loop())
+                watchdog = asyncio.create_task(self._controller_watchdog(ws))
+            if self.activation_code:
+                self.publish({"type": "activation", "code": self.activation_code})
+            if self.audio_format:
+                self.publish({"type": "audio_format", **self.audio_format})
+            async for raw in ws:
+                try:
+                    if isinstance(raw, bytes):
+                        if self.session is None:
+                            raise RuntimeError("灵矽语音尚未接入")
+                        self.session.feed_microphone(raw)
+                        continue
+                    cmd = json.loads(raw)
+                    if not isinstance(cmd, dict):
+                        raise ValueError("指令格式错误")
+                    if cmd.get("type") == "stop":
+                        await cancel_manual()
+                        if self._armed:
+                            self._set_armed(False)
+                        await self.tank.stop()
+                    elif cmd.get("type") == "presence" and self.gateway:
+                        if not self._valid_lease(cmd.get("lease")):
+                            raise ValueError("控制连接已过期")
+                        self._last_presence = time.monotonic()
+                    elif cmd.get("type") in ("drive", "pad"):
+                        if self.gateway and not self._valid_lease(cmd.get("lease")):
+                            raise ValueError("控制指令已过期，请重试")
+                        if cmd["type"] == "drive":
+                            values = {"forward": (80, 80), "backward": (-80, -80),
+                                      "left": (-80, 80), "right": (80, -80)}
+                            direction = cmd.get("direction")
+                            if not isinstance(direction, str) or direction not in values:
+                                raise ValueError("未知方向")
+                            left, right = values[direction]
+                        else:
+                            left, right = cmd.get("l"), cmd.get("r")
+                            if not all(type(v) is int and -100 <= v <= 100 for v in (left, right)):
+                                raise ValueError("摇杆力度必须是 -100 到 100 的整数")
+                        if not left and not right:
+                            await cancel_manual()
+                            if self._armed:
+                                self._set_armed(False)
+                            await self.tank.stop()
+                        else:
+                            pending_manual = (left, right, cmd.get("lease"), time.monotonic())
+                            if manual_task is None or manual_task.done():
+                                manual_task = asyncio.create_task(run_manual())
+                    elif cmd.get("type") in ("barrel", "fire_arm", "fire"):
+                        kind = cmd["type"]
+                        # 锁定和急停一样始终可以执行；其他操作必须来自新鲜网页。
+                        disarm = kind == "fire_arm" and cmd.get("on") is False
+                        if self.gateway and not disarm and not self._valid_lease(cmd.get("lease")):
+                            raise ValueError("控制指令已过期，请重试")
+                        if kind == "barrel":
+                            direction = cmd.get("direction")
+                            if direction not in ("up", "down"):
+                                raise ValueError("炮台方向无效")
+                            await cancel_manual()
+                            await self.tank.stop()
+                            result = self.tank.barrel(direction, 200)
+                            self.publish({"type": "action_result", "action": kind, "message": result})
+                        elif kind == "fire_arm":
+                            on = cmd.get("on")
+                            if type(on) is not bool:
+                                raise ValueError("启用发射参数无效")
+                            if on and not self.fire_status()["available"]:
+                                raise PermissionError(self.fire_status()["reason"])
+                            self._set_armed(on)
+                            if not on:
+                                await cancel_manual()
+                                await self.tank.stop()
+                        else:
+                            if not self.fire_authorized():
+                                raise PermissionError("请先在网页启用发射")
+                            now = time.monotonic()
+                            if self.tank.busy or now < self._next_shot_at:
+                                raise RuntimeError("小车正在执行动作或发射冷却中，请稍后再试")
+                            await cancel_manual()
+                            await self.tank.stop()
+                            result = self.tank.fire(1)
+                            cooldown_ms = self.tank.fire_pulse_ms + int(self.tank.fire_cooldown_s * 1000)
+                            self._next_shot_at = time.monotonic() + cooldown_ms
+                            self.publish({"type": "action_result", "action": kind, "message": result,
+                                          "cooldown_ms": cooldown_ms})
+                    elif cmd.get("type") == "mic":
+                        if self.session is None or not isinstance(cmd.get("on"), bool):
+                            raise ValueError("灵矽语音尚未接入")
+                        self.session.mic_enabled = cmd["on"]
+                    else:
+                        raise ValueError("未知指令")
+                except (ValueError, TypeError, RuntimeError, OSError) as exc:
+                    self.publish({"type": "error", "message": str(exc)})
+        except ConnectionClosed:
+            pass
+        finally:
+            if owner:
+                try:
+                    await cancel_manual()
+                    if self.session:
+                        self.session.mic_enabled = False
+                    self._last_presence = 0.0
+                    self._set_armed(False)
+                    await self.tank.stop()
+                finally:
+                    self._outgoing = None
+                    self._controller = None
+                    for task in (sender, leases, watchdog):
+                        if task:
+                            task.cancel()
+                    await asyncio.gather(*(task for task in (sender, leases, watchdog) if task),
+                                         return_exceptions=True)
+
+
+async def _run(port: int, token: str, https_origin: str | None = None, linx_state: str | None = None,
+               real_car: bool = False, car_port: int = 18767, allow_fire: bool = False):
+    gateway = None
+    if real_car:
+        from .cloud_car import CloudCarBackend, CloudCarGateway
+
+        gateway = CloudCarGateway(os.environ.get("CAR_DEVICE_TOKEN", ""))
+        owner = {}
+        backend = CloudCarBackend(gateway, lambda: owner["demo"].controller_authorized(),
+                                  lambda: owner["demo"].fire_authorized())
+    else:
+        backend = MockBackend()
+    tank = TankExecutor(backend, max_speed=40, fire_enabled=False)
+    demo = CloudDemo(tank, token, gateway, fire_allowed=allow_fire)
+    if gateway:
+        owner["demo"] = demo
+        gateway.on_status = demo.on_car_status
+        gateway.on_disconnect = lambda: asyncio.create_task(tank.stop())
+    tank.on_error = lambda message: demo.publish({"type": "error", "message": message})
+    await tank.start()
+    runner = None
+    try:
+        if gateway:
+            await gateway.start(car_port)
+        if linx_state:
+            from .cloud_audio import BrowserLinxSession
+            from .cloud_linx import make_cloud_endpoint
+            from .identity import load_or_create
+            from .mcp import McpServer
+            from .tools import register_tank_tools
+
+            ident = load_or_create(linx_state)
+            loop = asyncio.get_running_loop()
+            endpoint = make_cloud_endpoint(ident, lambda code: loop.call_soon_threadsafe(demo.on_activation, code))
+            mcp = McpServer()
+            register_tank_tools(mcp, tank)
+            demo.session = BrowserLinxSession(ident, mcp, endpoint, on_pcm=demo.publish,
+                                             on_format=demo.on_audio_format, on_flush=demo.on_audio_flush,
+                                             on_event=demo.on_linx_event)
+            runner = asyncio.create_task(demo.session.run_forever())
+        await demo.start(port, https_origin)
+        print(f"云端控制台监听 127.0.0.1:{port}（{'真实小车' if gateway else '模拟小车'}，发射默认锁定）")
+        async with demo.server:
+            await asyncio.Future()  # 不依赖 stdin，适合无交互测试
+    finally:
+        if demo.session:
+            await demo.session.close()
+        if runner:
+            runner.cancel()
+            await asyncio.gather(runner, return_exceptions=True)
+        await tank.close()
+        if gateway and gateway.server:
+            gateway.server.close()
+            await gateway.server.wait_closed()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="仅监听本机的云控车入口")
+    parser.add_argument("--port", type=int, default=18765, help="本机监听端口（默认 18765）")
+    parser.add_argument("--https-origin", help="可选的 HTTPS 代理来源；需另外配置鉴权及限流")
+    parser.add_argument("--linx-state", help="可选的独立灵矽设备身份文件")
+    parser.add_argument("--real-car", action="store_true", help="启用实车直连；需配置 CAR_DEVICE_TOKEN")
+    parser.add_argument("--allow-fire", action="store_true", help="允许网页启用发射；需新版车端，每次连接仍默认锁定")
+    parser.add_argument("--car-port", type=int, default=18767, help="车端连接监听端口（仅回环）")
+    args = parser.parse_args()
+    token = os.environ.get("CAR_DEMO_TOKEN", "")
+    if len(token) < 32:
+        parser.error("请通过 CAR_DEMO_TOKEN 环境变量设置至少 32 个字符的随机密码")
+    if args.real_car and len(os.environ.get("CAR_DEVICE_TOKEN", "")) < 32:
+        parser.error("实车模式需要通过 CAR_DEVICE_TOKEN 设置至少 32 个字符的随机密码")
+    try:
+        asyncio.run(_run(args.port, token, args.https_origin, args.linx_state, args.real_car, args.car_port,
+                         args.allow_fire))
+    except KeyboardInterrupt:
+        print("云端控制台已停止")
+
+
+if __name__ == "__main__":
+    main()

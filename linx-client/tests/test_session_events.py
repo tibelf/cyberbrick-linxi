@@ -91,6 +91,31 @@ def test_run_forever_retries_and_reconnects_until_closed():
     asyncio.run(main())
 
 
+def test_repeated_clean_disconnects_back_off(monkeypatch):
+    """被其他相同设备挤下线时，即使关闭码正常也不能疯狂重连。"""
+    async def main():
+        s = LinxSession(IDENT, McpServer(), lambda: ("", ""), audio=False)
+        waits = []
+        attempts = 0
+
+        async def closed_by_platform():
+            nonlocal attempts
+            attempts += 1
+
+        async def controlled_sleep(delay):
+            waits.append(delay)
+            if len(waits) == 6:
+                s._closing = True
+
+        s._run_once = closed_by_platform
+        monkeypatch.setattr("linx_client.session.asyncio.sleep", controlled_sleep)
+        await s.run_forever()
+        assert attempts == 6
+        assert waits == [1, 2, 4, 8, 16, 30]
+
+    asyncio.run(main())
+
+
 def test_say_and_send_text_use_listen_detect():
     async def main():
         got = []

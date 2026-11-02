@@ -36,6 +36,10 @@ STOP_GAP_CM = 8.0  # 到了以后车头离目标边缘多远
 # 去目标的哪一侧（从车看过去）。旁边 = 靠车这一侧；绕一圈 = 左边 → 后面 → 右边 → 回到出发点
 WHERE = ("旁边", "后面", "左边", "右边", "绕一圈", "撞倒")
 RAM_CM = 10.0  # 撞倒：车头碰到目标后再往前冲这么多
+# 口述摆放（不拍照）：用户说“纸杯在车头正前方 40 厘米”，或者还没拍过俯拍图时默认 50 厘米；四周当作空地
+ASSUMED_AHEAD_CM = 50
+ASSUMED_SIZE_CM = 8  # 纸杯、瓶子大小
+ASSUMED_FIELD_CM = 300
 BACK_CM = 15.0  # 撞完退回来这么多
 AROUND_GAP_CM = 4.0  # 绕到后面/侧面时，终点比膨胀区再往外这么多，保证落在能走的地方
 GOAL_TOLERANCE_CM = 15.0  # 规划出来的终点离想去的点超过这么多，说明那边没地方（出了照片或被挡住）
@@ -285,6 +289,18 @@ def stop_short(start, path, center, stop_cm: float) -> list:
     return out
 
 
+def assumed_map(target: str, ahead_cm: float, size_cm: float = ASSUMED_SIZE_CM) -> "BlindMap":
+    """不拍照：车在 3×3 米空地中间偏下、车头朝画面上方，target 在车头正前方 ahead_cm（中心到中心）。"""
+    W = H = int(ASSUMED_FIELD_CM)  # 1 像素 = 1 厘米
+    cx, cy = W / 2, H - 80
+    ty = cy - ahead_cm
+    pct = lambda v: v / W * 100  # noqa: E731  正方形，横纵同一个比例
+    car = (pct(cx - CAR_WID_CM / 2), pct(cy - CAR_LEN_CM / 2), pct(cx + CAR_WID_CM / 2), pct(cy + CAR_LEN_CM / 2))
+    tgt = (pct(cx - size_cm / 2), pct(ty - size_cm / 2), pct(cx + size_cm / 2), pct(ty + size_cm / 2))
+    fmt = lambda b: ",".join(f"{v:.2f}" for v in b)  # noqa: E731
+    return BlindMap(W, H, f"坦克={fmt(car)}；车头=上；{target}={fmt(tgt)}", view_cm=W)
+
+
 Ask = Callable[..., Awaitable[str]]
 Say = Callable[[str], Awaitable[None]]
 
@@ -389,8 +405,16 @@ class BlindNavigator:
         end = route_end(m.pose, path, face=center)
         return steps, end, path, center, extra, fm
 
-    def goto(self, target: str, where: str = "旁边") -> str:
-        """self.blind.goto：规划好就开始闭眼走，立即返回计划。"""
+    def goto(self, target: str, where: str = "旁边", ahead_cm: int = 0) -> str:
+        """self.blind.goto：规划好就开始闭眼走，立即返回计划。
+        ahead_cm > 0，或者还没拍过俯拍图：不拍照，按 target 在车头正前方 ahead_cm（默认 50）厘米来规划。"""
+        assumed = ""
+        if ahead_cm or self.map is None:
+            d = int(ahead_cm) or ASSUMED_AHEAD_CM
+            if not 20 <= d <= 150:
+                raise ValueError("目标离车要在 20–150 厘米之间")
+            self.map = assumed_map(target, d)
+            assumed = f"（没拍照，按{target}在车头正前方 {d} 厘米算）"
         m = self.map
         steps, end, path, center, extra, fm = self.plan(target, where)
         if where == "旁边" and not any(k == "forward" for k, _ in steps):
@@ -406,7 +430,7 @@ class BlindNavigator:
         self.tank.start_mission(desc, lambda: self._run(steps, end, place))
         if where == "绕一圈":
             drift = drift or "（绕一圈拐弯多，回到起点可能偏二三十厘米）"
-        return (f"开始{desc}：{len(steps)} 个动作，约 {total_s:.0f} 秒，不再看摄像头{narrow}{drift}")
+        return (f"开始{desc}{assumed}：{len(steps)} 个动作，约 {total_s:.0f} 秒，不再看摄像头{narrow}{drift}")
 
     def _goal(self, target: str):
         m = self.map

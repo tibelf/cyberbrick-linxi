@@ -323,7 +323,7 @@ class TankExecutor:
 
     def fire(self, shots: int = 1) -> str:
         if not self.fire_enabled:
-            raise PermissionError("发射功能已被锁定（启动参数 --no-fire）")
+            raise PermissionError("发射功能已被锁定")
         n = max(1, min(int(shots), self.max_shots))
         ms = int(n * (self.fire_pulse_ms + self.fire_cooldown_s * 1000))
         self._record(f"开火 {n}")

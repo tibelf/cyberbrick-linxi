@@ -1,0 +1,21 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-11-01T15:05:14Z"},
+  "title": "CyberBrick · Android 遥控器",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 390, "h": 844, "title": "01 遥控 · 默认锁定", "is_interactive": true, "radius": 24},
+    "Voice.dc.html": {"x": 470, "y": 0, "w": 390, "h": 844, "title": "02 语音 · 收音与回复", "is_interactive": true, "radius": 24},
+    "Fire.dc.html": {"x": 940, "y": 0, "w": 390, "h": 844, "title": "03 单发 · 就绪与冷却", "is_interactive": true, "radius": 24},
+    "Connect.dc.html": {"x": 0, "y": 964, "w": 390, "h": 844, "title": "04 连接 · 原生表单", "is_interactive": true, "radius": 24},
+    "Offline.dc.html": {"x": 470, "y": 964, "w": 390, "h": 844, "title": "05 离线 · 暂停控制", "is_interactive": true, "radius": 24}
+  },
+  "order": ["Main.dc.html", "Voice.dc.html", "Fire.dc.html", "Connect.dc.html", "Offline.dc.html"],
+  "notes": {
+    "collection-title": {"x": 0, "y": -280, "text": "CyberBrick · Android", "kind": "title1", "maxW": 1330},
+    "prototype-guide": {"x": 1410, "y": 0, "w": 350, "text": "操作预览\n进入 Play 后可点击底部导航切换页面。遥控页支持按下／松手的反馈，炮台按钮更新动作提示，启用发射进入单发状态，点击单发可查看冷却。\n\n所有在线、录音与动作状态均为设计示例，不代表实时实车状态。原型不连接云端、不访问麦克风、不控制小车。", "fill": "gray"},
+    "design-direction": {"x": 1410, "y": 510, "w": 350, "text": "设计方向\n借用现有小车的石墨灰与黄色，突出手动控制与单次操作。保持明确的收音反馈、固定停车入口，以及云端／小车／语音三种连接状态。\n\n未添加电量、延迟、炮管角度或摄像头画面：目前没有这些数据来源。", "fill": "gray"}
+  },
+  "designSystems": []
+}
