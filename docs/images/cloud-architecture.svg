@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="cloud-architecture-title cloud-architecture-desc" id="cloud-architecture-root">
+  <title id="cloud-architecture-title">CyberBrick 手机与小车直连云端架构</title>
+  <desc id="cloud-architecture-desc">手机通过云服务器控制小车并收放语音，云服务器对接灵矽理解指令与生成回复，小车经 Wi-Fi 或热点主动连接云端执行动作并回传应答，现场无需电脑中转。</desc>
+  <defs>
+      <style>#cloud-architecture-root { --paper:#F5F5F2; --panel:#EBEDEB; --node:#FCFCFA; --ink:#171A20;
+      --muted:#4B5563; --soft:#596270; --rule:#CDD1D4; --outline:#737D89;
+      --accent:#806400; --accent-tint:#F7F0D1; --brand:#E8C547; --link:#4B5563;
+      --sans:'Roboto','Noto Sans SC','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
+      --serif:'Instrument Serif','Noto Serif SC','Songti SC',serif;
+      --mono:'Geist Mono',ui-monospace,'SFMono-Regular',Consolas,monospace; }
+      #cloud-architecture-root { color: var(--ink); font-family: var(--sans); }
+      #cloud-architecture-root .diagram-container { width:100%; overflow-x:auto; }
+      #cloud-architecture-root text { fill:var(--ink); font-family:var(--sans); }
+      #cloud-architecture-root .figure-title { font-family:var(--serif); font-size:40px; font-weight:400; }
+      #cloud-architecture-root .node-name { font-size:16px; font-weight:600; }
+      #cloud-architecture-root .body-text { font-size:12px; font-weight:400; fill:var(--muted); }
+      #cloud-architecture-root .technical { font-family:var(--mono); font-size:12px; font-weight:400; fill:var(--muted); }
+      #cloud-architecture-root .tag { font-size:12px; font-weight:500; fill:var(--soft); }
+      #cloud-architecture-root .kicker { font-family:var(--mono); font-size:8px; font-weight:500; letter-spacing:1.4px; fill:var(--soft); }
+      #cloud-architecture-root .arrow-label { font-size:12px; font-weight:500; fill:var(--muted); text-anchor:middle; }
+      #cloud-architecture-root .connector { fill:none; stroke:var(--link); stroke-width:1.6; marker-end:url(#cloud-architecture-arrow-link); }
+      #cloud-architecture-root .return { stroke:var(--muted); stroke-width:1.2; stroke-dasharray:5 4; marker-end:url(#cloud-architecture-arrow); }
+      #cloud-architecture-root .icon { fill:none; stroke:var(--muted); stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+      #cloud-architecture-root .editorial { padding:16px 48px 40px; }
+      #cloud-architecture-root .editorial h1 { font-family:var(--serif); font-size:40px; font-weight:400; margin:0 0 16px; }
+      #cloud-architecture-root .editorial p { max-width:920px; font-size:16px; line-height:1.8; margin:0 0 24px; }
+      #cloud-architecture-root .editorial-grid { display:grid; grid-template-columns:1.2fr 1fr; gap:32px; border-top:1px solid var(--rule); padding-top:24px; }
+      #cloud-architecture-root .editorial h2 { font-size:16px; margin:0 0 12px; }
+      #cloud-architecture-root .editorial-grid p { font-size:14px; color:var(--muted); }
+      #cloud-architecture-root .sr-only { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+      @media (max-width:640px) {
+#cloud-architecture-root .editorial { padding:24px; }
+      #cloud-architecture-root .editorial-grid { grid-template-columns:1fr; }
+}
+      @media print {
+#cloud-architecture-root .diagram-container { overflow-x:visible; }
+}</style>
+    <marker id="cloud-architecture-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#4B5563"/></marker>
+    <marker id="cloud-architecture-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#806400"/></marker>
+    <marker id="cloud-architecture-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#4B5563"/></marker>
+  </defs>
+  <rect x="0" y="0" width="1280" height="720" fill="#F5F5F2"/>
+  <text x="48" y="60" class="kicker">CYBERBRICK / ARCHITECTURE</text>
+  <text x="48" y="116" class="figure-title">手机在手，小车连云</text>
+  <text x="48" y="148" class="node-name" style="font-weight:400;fill:var(--muted)">手机操作，云端排程，车端执行。</text>
+  <rect x="1040" y="80" width="192" height="40" rx="4" fill="#E8C547"/>
+  <text x="1136" y="105" text-anchor="middle" font-size="12" font-weight="600" fill="#171A20" style="fill:#171A20">日常使用无需电脑</text>
+
+  <!-- 先绘制链路。三组双向关系分成六条有独立端点的单向箭头。 -->
+  <line x1="296" y1="416" x2="472" y2="416" class="connector" data-edge="phone-cloud"/>
+  <line x1="472" y1="488" x2="296" y2="488" class="connector return" data-edge="cloud-phone"/>
+  <line x1="808" y1="416" x2="984" y2="416" class="connector" data-edge="cloud-car"/>
+  <line x1="984" y1="488" x2="808" y2="488" class="connector return" data-edge="car-cloud"/>
+  <line x1="584" y1="344" x2="584" y2="288" class="connector" data-edge="cloud-linx"/>
+  <line x1="696" y1="288" x2="696" y2="344" class="connector return" data-edge="linx-cloud"/>
+
+  <!-- 标签有独立遮罩，与相应连线保持 8px 间距。 -->
+  <g data-label-for="phone-cloud"><rect x="324" y="388" width="120" height="20" fill="#F5F5F2"/><text x="384" y="402" class="arrow-label">操作 · 语音</text></g>
+  <g data-label-for="cloud-phone"><rect x="324" y="460" width="120" height="20" fill="#F5F5F2"/><text x="384" y="474" class="arrow-label">状态 · 回复</text></g>
+  <g data-label-for="cloud-car"><rect x="836" y="388" width="120" height="20" fill="#F5F5F2"/><text x="896" y="402" class="arrow-label">动作指令</text></g>
+  <g data-label-for="car-cloud"><rect x="836" y="460" width="120" height="20" fill="#F5F5F2"/><text x="896" y="474" class="arrow-label">上线 · 应答</text></g>
+  <g data-label-for="cloud-linx"><rect x="480" y="308" width="96" height="20" fill="#F5F5F2"/><text x="528" y="322" class="arrow-label">语音上传</text></g>
+  <g data-label-for="linx-cloud"><rect x="704" y="308" width="96" height="20" fill="#F5F5F2"/><text x="752" y="322" class="arrow-label">回复与工具调用</text></g>
+
+  <!-- 手机：输入节点。 -->
+  <g data-node="phone">
+    <rect x="48" y="344" width="248" height="216" rx="6" fill="#F5F5F2"/>
+    <rect x="48" y="344" width="248" height="216" rx="6" fill="#EBEDEB" stroke="#737D89" stroke-width="1"/>
+    <text x="72" y="376" class="tag">手机入口</text>
+    <g class="icon" transform="translate(244 364)" aria-hidden="true">
+      <rect x="0" y="0" width="24" height="36" rx="4"/><path d="M8 5H16M10 30H14"/>
+    </g>
+    <text x="72" y="416" class="node-name">手机</text>
+    <text x="72" y="444" class="body-text">Android App / HTTPS 网页</text>
+    <line x1="72" y1="464" x2="272" y2="464" stroke="#CDD1D4"/>
+    <text x="72" y="492" class="body-text">摇杆 / 按键 · 语音收放</text>
+    <text x="72" y="520" class="body-text">状态与回复展示</text>
+  </g>
+
+  <!-- 云端：全图的唯一重点节点。 -->
+  <g data-node="cloud">
+    <rect x="472" y="344" width="336" height="216" rx="6" fill="#F5F5F2"/>
+    <rect x="472" y="344" width="336" height="216" rx="6" fill="#F7F0D1" stroke="#806400" stroke-width="1.6"/>
+    <text x="496" y="376" class="tag" style="fill:var(--accent)">控制与语音中枢</text>
+    <g class="icon" transform="translate(752 364)" aria-hidden="true" style="stroke:var(--accent)">
+      <rect x="0" y="0" width="32" height="12" rx="2"/><rect x="0" y="20" width="32" height="12" rx="2"/><path d="M6 6H10M6 26H10M20 6H26M20 26H26"/>
+    </g>
+    <text x="496" y="416" class="node-name">云服务器</text>
+    <text x="496" y="444" class="technical">linx-client</text>
+    <line x1="496" y1="464" x2="784" y2="464" stroke="#737D89" stroke-opacity=".35"/>
+    <text x="496" y="492" class="body-text">灵矽会话 · MCP 工具</text>
+    <text x="496" y="520" class="body-text">动作排程 · 租约校验</text>
+  </g>
+
+  <!-- 小车：与云端双向传输，但连接由车端主动发起。 -->
+  <g data-node="car">
+    <rect x="984" y="344" width="248" height="216" rx="6" fill="#F5F5F2"/>
+    <rect x="984" y="344" width="248" height="216" rx="6" fill="#FCFCFA" stroke="#737D89" stroke-width="1"/>
+    <text x="1008" y="376" class="tag">车端执行</text>
+    <g class="icon" transform="translate(1176 364)" aria-hidden="true">
+      <rect x="0" y="16" width="36" height="16" rx="6"/><path d="M8 16V8H24V16M16 8V0M7 24H29"/><circle cx="8" cy="24" r="3"/><circle cx="28" cy="24" r="3"/>
+    </g>
+    <text x="1008" y="416" class="node-name">CyberBrick Core</text>
+    <text x="1008" y="444" class="technical">ESP32-C3 / MicroPython</text>
+    <line x1="1008" y1="464" x2="1208" y2="464" stroke="#CDD1D4"/>
+    <text x="1008" y="492" class="body-text">履带 · 炮台 · 扳机</text>
+    <text x="1008" y="520" class="body-text">指令校验 · 设备看门狗</text>
+  </g>
+
+  <!-- 灵矽：外部语音服务，不承担手机手动操控的转发。 -->
+  <g data-node="linx">
+    <rect x="472" y="176" width="336" height="112" rx="6" fill="#F5F5F2"/>
+    <rect x="472" y="176" width="336" height="112" rx="6" fill="#EBEDEB" stroke="#737D89" stroke-width="1"/>
+    <text x="496" y="204" class="tag">语音服务</text>
+    <text x="496" y="232" class="node-name">灵矽 Linx</text>
+    <text x="496" y="264" class="body-text">语音识别 → 大模型 → 语音合成</text>
+    <g class="icon" transform="translate(752 204)" aria-hidden="true"><path d="M0 20V12M8 28V4M16 32V0M24 24V8M32 20V12"/></g>
+  </g>
+
+  <text x="48" y="600" class="body-text">手动操作直接进入云端排程</text>
+  <text x="472" y="600" class="body-text">灵矽设备身份保存在服务器</text>
+  <text x="984" y="588" class="body-text">2.4 GHz Wi-Fi / 手机热点</text>
+  <text x="984" y="612" class="body-text">小车主动建立 WSS 连接</text>
+
+  <!-- 图例独占底部区域。 -->
+  <line x1="48" y1="652" x2="1232" y2="652" stroke="#CDD1D4"/>
+  <line x1="48" y1="680" x2="88" y2="680" class="connector"/>
+  <text x="104" y="684" class="body-text">指令 / 音频上传</text>
+  <line x1="304" y1="680" x2="344" y2="680" class="connector return"/>
+  <text x="360" y="684" class="body-text">回复 / 状态返回</text>
+  <text x="1232" y="684" text-anchor="end" class="body-text">连接均通过加密通道</text>
+</svg>

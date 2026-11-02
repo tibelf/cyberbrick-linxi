@@ -28,16 +28,12 @@
 
 ## 架构
 
-```mermaid
-flowchart LR
-    phone["手机<br/>Android App / HTTPS 网页"]
-    cloud["云服务器<br/>linx-client · MCP · 动作排程"]
-    linx["灵矽平台<br/>语音识别 · 大模型 · 语音合成"]
-    car["CyberBrick Core<br/>ESP32-C3 · MicroPython"]
-    phone <-->|"WSS：控制与音频"| cloud
-    cloud <-->|"WSS：语音与工具调用"| linx
-    car <-->|"经 Wi-Fi / 热点主动建立 WSS"| cloud
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/cloud-architecture-dark.svg">
+  <img src="docs/images/cloud-architecture.svg" alt="手机通过云服务器操控 CyberBrick；云端对接灵矽处理语音，小车经 Wi-Fi 或热点主动建立 WSS 连接，现场无需电脑。">
+</picture>
+
+[查看大图](docs/images/cloud-architecture.svg) · [深色版](docs/images/cloud-architecture-dark.svg) · [图源与设计说明](docs/images/cloud-architecture-style.md)
 
 手机和小车分别连接云端，无需电脑中转，也无需在热点上开放入站端口。手动操作直接进入云端排程；语音由灵矽转换为 MCP 工具调用，再经过同一执行器。车端检查指令编号、时效和参数，设备看门狗负责超时停车。
 
