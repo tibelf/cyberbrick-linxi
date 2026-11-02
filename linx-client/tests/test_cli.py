@@ -92,11 +92,13 @@ def test_run_blind_replaces_seek(run_cli, photo_file):
     assert "self.tank.seek" not in names  # 闭眼模式不注册一直拍照的 seek
 
 
-def test_run_blind_without_camera_warns(run_cli, capsys):
+def test_run_blind_without_camera_registers_spoken_navigation(run_cli, capsys):
     names = tools(run_cli("--token", "tok", "--blind", "--blind-view-cm", "120"))
     out = capsys.readouterr().out
-    assert "--blind 要配合 --camera" in out
-    assert "self.blind.goto" not in names
+    assert "闭眼导航（没开摄像头）" in out
+    assert "50 厘米" in out  # 向用户说明未口述距离时的默认假设
+    assert "self.blind.goto" in names
+    assert not names & {"self.blind.map", "self.camera.take_photo", "self.tank.seek"}
 
 
 def test_run_blind_view_without_blind_warns(run_cli, capsys, photo_file):
