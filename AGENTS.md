@@ -21,10 +21,11 @@
 
 **当前主线（2026-11-01）**：手机网页收音/播报和按键 → 腾讯云 `linx-client` → 小车经热点主动 WSS 连云。用户已确认手机按住前进、松手停车，以及拔掉 USB 后仍在线并通过语音让履带转动和停下，现场无需电脑的链路已实测。语音为点击开始、再次点击结束，有音量条和计时。炮管微调、启用/锁定发射与单发已部署；云端 `--allow-fire`、新版车端 `fire-v1` 与当前页面启用状态共同控制发射，连接/停车/断线后默认锁定。设备应答与用户观察确认炮台上下及空载扳机均有动作；本轮未测试有弹发射。摄像头暂停；真实断网停车和当前限速下地面行驶仍未实测，详见 `docs/云端直连实车.md` 和 `docs/HANDOFF.md`。下文电脑端方案仍可使用。腾讯云与火山云身份相同，不可同时启动灵矽会话。
 
-七牛 Hackathon「智能硬件」课题：一辆能发射子弹的 CyberBrick 小车（Mini T 类履带车，主控 Core = ESP32-C3 / MicroPython），接入灵矽（Linx）平台实现语音控制。没有灵矽实体硬件，由 `linx-client/` 在电脑上**模拟一台灵矽设备**（电脑麦克风/扬声器），再通过 Wi-Fi 或 USB 串口控车。
+七牛 Hackathon「智能硬件」课题：一辆能发射子弹的 CyberBrick 小车（Mini T 类履带车，主控 Core = ESP32-C3 / MicroPython），接入灵矽（Linx）平台实现语音控制。当前由云服务器上的 `linx-client/` 承载灵矽设备会话，手机 App / 网页收放音和操作，小车经 2.4 GHz Wi-Fi / 热点主动 WSS 连云；日常使用无需电脑。
 
-- **主线**：`linx-client/`（Python）在电脑上模拟灵矽设备，通过 Wi-Fi UDP（主用）或 USB 串口控车。曾计划的安卓网页版（WebUSB / Web Bluetooth）没有实施，已删除。
-- 文档（中文）：`docs/架构设计.md`（架构、模块规格、主打场景、分工）、`docs/技术方案.md`（协议和实现细节、里程碑、风险）、`docs/运行说明.md`（安装运行、演示脚本）。改架构或协议时同步更新。
+- **主线**：`linx_client.cloud_demo` 提供手机控制与音频入口，`cloud_car.py` 对接车端 `firmware/car/cloud_main.py`；只有显式 `--real-car` 才控制实车。`android-app/` 为原生手机入口，HTTPS 网页仍可使用。
+- **电脑模式**：`python -m linx_client run` 保留局域网 UDP / USB 调试，以及宏、闲逛、视觉等扩展；这些扩展没有全部注册到云端入口。`wifi-setup` 仍安装局域网程序，不能当作云端安装器。早期 WebUSB / Web Bluetooth 方案未实施，与现有云端网页是不同路径。
+- 文档（中文）：`README.md`（云端主线与手机快速开始）、`docs/云端直连实车.md`（云端协议、使用与实测边界）、`android-app/README.md`（原生 App）；`docs/架构设计.md`、`docs/技术方案.md`、`docs/运行说明.md` 保留电脑模式细节。改架构或协议时同步更新。
 - **Device-Id 就是灵矽的唯一凭据**（平台不校验 token），绝不能写进仓库（仓库是公开的）。
 - 文档、注释、终端输出、MCP 工具描述均使用中文，保持一致。
 
@@ -38,6 +39,8 @@ python -m pytest                                    # 全部测试（无需硬�
 node --test tests/test_cloud_voice_ui.mjs             # 云端网页录音状态测试（无需麦克风）
 python -m pytest tests/test_executor.py::test_fire_locked   # 单个测试
 
+python -m linx_client.cloud_demo --help              # 云端入口；部署及口令要求见 linx-client/README.md
+# 以下为电脑 / 局域网模式，不能替代云端装车配置
 python -m linx_client activate                      # OTA 激活，打印 6 位激活码，到智控台绑定
 python -m linx_client run --backend mock            # 连灵矽，工具调用只打印不控车
 python -m linx_client run --backend serial --max-speed 40
@@ -66,7 +69,8 @@ python -m linx_client list-audio
 
 1. **灵矽平台（听和想）**：ASR → LLM（Function Call）→ TTS。把「前进两秒再开火」拆成多次 MCP `tools/call`。智控台必须把意图识别设为 Function Call，角色提示词在 `prompts/agent-prompt.md`。
 2. **linx-client（排程和安全）**
-   - `session.py`：WebSocket 会话。握手头必须带 `Authorization: Bearer`、`Device-Id`、`Client-Id`、`Protocol-Version`（所以客户端只能是本地程序，不能是网页）。上行 PCM 16k/20ms，下行格式以服务端 hello 为准（可能是 opus，需 opuslib）。默认半双工：TTS 播报期间丢弃麦克风帧（声卡余音约 0.4s 也算播报中）。`--duplex` 全双工：播报期间只上传静音，`echo.py` 的 `BargeInDetector` 按「麦克风音量 / 播放音量」估回声增益，明显超过回声才算插话，打断后补传那几帧原声。断线指数退避重连；收到 `config_updated` 通知会主动断开重连。
+   - **云端入口**：`cloud_demo.py` 接手机 `/control`，`cloud_audio.py` 转发手机音频，`cloud_linx.py` 处理绑定及加密平台连接，`cloud_car.py` 接小车主动建立的 `/device`。手机与设备分别认证；手机租约、指令时效、最新摇杆值合并和停车取消均在云端处理，动作仍经 executor。当前只注册基础小车工具；下面的宏、视觉、导航和闲逛是电脑模式扩展。
+   - `session.py`：WebSocket 会话。握手头必须带 `Authorization: Bearer`、`Device-Id`、`Client-Id`、`Protocol-Version`，由云端或电脑上的 Python 程序持有，网页不直接接灵矽。上行 PCM 16k/20ms，下行格式以服务端 hello 为准（电脑模式可能需 opuslib，当前云端适配仅支持 PCM）。默认半双工：TTS 播报期间丢弃麦克风帧（声卡余音约 0.4s 也算播报中）。电脑模式 `--duplex` 全双工：播报期间只上传静音，`echo.py` 的 `BargeInDetector` 按「麦克风音量 / 播放音量」估回声增益，明显超过回声才算插话，打断后补传那几帧原声。断线指数退避重连；收到 `config_updated` 通知会主动断开重连。
    - `mcp.py`：设备端 MCP 服务（平台是客户端），消息封装为 `{"type":"mcp","payload":<JSON-RPC>}`。参数只用 integer/string/boolean；`Prop.coerce` 会把整数裁剪到 min/max。工具异常一律转成 `isError` 结果返回，绝不让连接断掉。
    - `tools.py`：工具名、描述、参数 schema。**描述文字直接决定大模型何时调用**（如 fire 只在用户明确要求时调用）。
    - `tank/executor.py`：动作队列。工具调用**立即返回「已安排」**，动作在后台 worker 中顺序执行，因此多次调用会自然串成序列。`stop()` 不进队列：清空队列、取消当前动作、halt。动作在后台失败时记进 `last_error` 并通过 `on_error` 通知（网页 + 语音），不能只打印；`check()` 调用 backend 可选的 `ping()` 真的问车（UDP 用车端 `stat` 的开机时长发现车重启过），空闲时每 5 秒心跳。
@@ -78,13 +82,13 @@ python -m linx_client list-audio
    - `macros.py`：动作宏（语音编程）`self.macro.save/run/list/delete/record_start/record_stop`。步骤是一行一句的固定写法（`前进 2000`、`左转 90`、`炮管抬 300`、`开火 1`、`跳舞`、`等待 500`、`情绪 开心`、`执行 别的宏`），大模型照写、录制时 executor 也按这个写（`TankExecutor.recorder`：用户下令的 move/turn/barrel/fire/dance 才记，任务和情绪小动作不记）。看不懂的步骤直接报错并给出正确写法，让大模型改了重调。执行作为任务跑（stop 能取消、每步照样受安全约束、一次最多 60s、套娃最多 3 层）。存在身份文件旁边的 `.macros.json`（gitignore），没有时先给内置的“巡逻”“庆祝”
    - `game.py`：打靶挑战 `self.game.start/hit/stop/status` + 网页计分板（倒计时、命中、开火、指令数、排行榜）。命中只由玩家说“打中了”或点网页按钮记，程序不猜；指令数由 `session.on_event` 的 tool 事件累计（只算移动/转向/开火/跳舞/寻的/宏）；记分 = 命中×100 + 全中时剩余秒数×5 − 没中的子弹×20 − 指令×5。游戏本身从不开火。排行榜存 `.leaderboard.json`（gitignore）
    - `tank/backend.py` 定义 `TankBackend` Protocol + `MockBackend`；`serial_repl.py` 是实车驱动。
-3. **CyberBrick Core（执行和保底）**：`serial_repl.py` 连接时进入 raw REPL，一次性注入 `BOOTSTRAP`（定义 `drive/aim/fire/halt` + `machine.Timer` 看门狗），之后每条指令只发一行函数调用，设备端不 sleep。
+3. **CyberBrick Core（执行和保底）**：云端主线由 `boot.py` 读取私有配置后启动 `cloud_main.py`，通过 `cloud_probe.py` 建立 TLS/WSS、轮询并校验指令，复用 `wifi_main.py` 的原厂驱动封装和看门狗。电脑 USB 模式由 `serial_repl.py` 进入 raw REPL，注入 `BOOTSTRAP` 后逐条调用；动作时长不靠设备端阻塞等待。
 
 ### 关键约定
 
-- **时长由主机控制，backend 只设状态**：`drive(left, right, failsafe_ms)` / `fire(pulse_ms)` 只设置输出并启动设备端看门狗；executor 负责 sleep 后 halt。`failsafe_ms = 时长 + 300ms`，主机崩溃或拔 USB 后设备会自己停。新增 backend（如计划中的 Wi-Fi UDP）必须保留这套语义。
+- **时长由主机控制，backend 只设状态**：`drive(left, right, failsafe_ms)` / `fire(pulse_ms)` 只设置输出并启动设备端看门狗；executor 负责 sleep 后 halt。`failsafe_ms = 时长 + 300ms`；云端、UDP 和串口 backend 均须保留看门狗语义，实际断网停车验证范围见交接记录。
 - 安全约束集中在 executor：单动作 ≤ 5s、队列总时长 ≤ 15s（超出就抛错拒绝）、速度裁剪到 `--max-speed`、发射每次 ≤ 3 发且间隔 1.5s 冷却、`--no-fire` 锁定。不要绕过 executor 直接调用 backend。
-- 接线以车上 `rc_config` 为准（见 `docs/HANDOFF.md`「已确认事实」）：履带 MOTOR1 Pin4/5、MOTOR2 Pin6/7（反装），炮塔 SERVO1 Pin3（连续旋转舵机），发射扳机 SERVO2 Pin2（86° 松开 / 150° 扣下）；`BOOTSTRAP` 调用车上原厂驱动 `/bbl/motors.py`、`/bbl/servos.py`。左右和方向待架空实测。raw REPL 会打断原厂程序，退出后按 Core 复位键才能恢复实体遥控。
+- 接线以车上 `rc_config` 为准（见 `docs/HANDOFF.md`「已确认事实」）：履带 MOTOR1 Pin4/5、MOTOR2 Pin6/7（反装），炮塔 SERVO1 Pin3（连续旋转舵机），发射扳机 SERVO2 Pin2（86° 松开 / 150° 扣下）；`BOOTSTRAP` 调用车上原厂驱动 `/bbl/motors.py`、`/bbl/servos.py`。左右和方向待架空实测。raw REPL 会打断当前车端程序；复位后按已有启动配置运行，安装本仓库启动程序时开机按住 Pin9 板载按键可回到原厂遥控。
 
 ## Tests
 
