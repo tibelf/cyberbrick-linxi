@@ -14,6 +14,12 @@
   <img src="docs/images/tank-top.jpg" width="49%" alt="小车俯视">
 </p>
 
+## 演示视频
+
+[![演示视频：点击播放](docs/images/demo-cover.jpg)](http://tfbe8bfmz.hd-bkt.clouddn.com/cyberbrick-linxi/demo.mp4)
+
+约 2 分钟。[在线播放](http://tfbe8bfmz.hd-bkt.clouddn.com/cyberbrick-linxi/demo.mp4)。视频介绍 CyberBrick Mini T 和七牛云灵矽的语音控制，并演示绕杯、跳舞，以及在办公室地毯上的实车行驶。手机云端的操作步骤见下文。
+
 ## 手机可以做什么
 
 | 功能 | 使用方式 |
@@ -71,11 +77,7 @@
 
 ## 电脑模式与早期演示
 
-仓库仍保留电脑运行 `linx-client`、通过局域网 UDP / USB 控车的方式，适合开发和调试。动作宏、闲逛、视觉导航和打靶计分等扩展由电脑模式提供，尚未接入当前云端入口；使用方法见 [电脑模式运行说明](docs/运行说明.md)。
-
-[![早期电脑模式演示：点击播放](docs/images/demo-cover.jpg)](http://tc4lcynug.hn-bkt.clouddn.com/demo.mp4)
-
-这段约 2 分钟的视频展示早期电脑模式的产品介绍、行驶风格和地毯实车演示。可查看 [仓库视频](docs/demo/demo.mp4) 或 [百度网盘](https://pan.baidu.com/s/1k9dztL7EulGWFYpBwRR4GQ?pwd=t991)；当前手机云端流程以本文说明为准。
+仓库仍保留电脑运行 `linx-client`、通过局域网 UDP / USB 控车的方式，适合开发和调试。动作宏、闲逛、视觉导航和打靶计分等扩展由电脑模式提供，尚未接入当前云端入口；使用方法见 [电脑模式运行说明](docs/运行说明.md)。演示见上文 [演示视频](#演示视频)。
 
 ## 文档与代码
 
